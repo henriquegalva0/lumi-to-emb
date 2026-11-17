@@ -1,0 +1,10 @@
+# Diagnóstico: empacota logs, versões e o estado da GPU num .tar.gz em diagnostics/.
+# Envie da raiz do repositório:  sauron submit -c jobs/diagnose.yaml jobs/diagnose.sh
+name: lumi-ctx-diagnose
+image: vllm/vllm-openai:v0.29.0
+gpus: 1
+vram: 160
+memory: 8g
+max_time: 15m
+
+workspace: lumi-inference

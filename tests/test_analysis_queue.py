@@ -1,0 +1,112 @@
+import math
+
+import numpy as np
+import pandas as pd
+
+from lumi_ctx import workqueue
+from lumi_ctx.analysis import (
+    bootstrap_ci,
+    build_summary,
+    l_star,
+    lstar_table,
+    model_memory,
+    recommendation,
+    sign_test_p,
+)
+from lumi_ctx.common import load_config
+
+LENGTHS = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 261120]
+
+
+def test_l_star_requires_all_shorter_lengths():
+    acc = dict(zip(LENGTHS, [1.0, 0.95, 0.9, 0.85, 0.95, 0.99, 0.2, 0.1]))
+    assert l_star(acc, LENGTHS, 0.9) == 8192  # 32k volta acima, mas 16k já falhou
+    assert l_star({2048: 0.5}, LENGTHS, 0.9) is None
+    assert l_star(dict.fromkeys(LENGTHS, 1.0), LENGTHS, 0.9) == 261120
+    assert l_star({2048: 1.0, 4096: math.nan}, LENGTHS, 0.9) == 2048
+
+
+def test_bootstrap_ci_properties():
+    lo, hi = bootstrap_ci([1.0] * 20, [0.5] * 20, 500, 1)
+    assert lo == hi == 1.0
+    v = [1.0] * 10 + [0.0] * 10
+    lo, hi = bootstrap_ci(v, [0.0] * 10 + [1.0] * 10, 500, 1)
+    assert lo == hi == 0.5  # estratificado: cada estrato é constante
+    lo, hi = bootstrap_ci(v, [0.0] * 20, 2000, 1)
+    assert 0.25 < lo < 0.5 < hi < 0.75
+    assert bootstrap_ci(v, [-1.0] * 20, 100, 1) == bootstrap_ci(v, [-1.0] * 20, 100, 1)
+
+
+def test_sign_test():
+    assert sign_test_p(0, 0) == 1.0
+    assert sign_test_p(10, 0) < 0.01
+    assert abs(sign_test_p(3, 3) - 1.0) < 1e-12
+    assert abs(sign_test_p(1, 0) - 1.0) < 1e-12
+
+
+def _synthetic_df(cfg):
+    rows = []
+    rng = np.random.default_rng(0)
+    for model, knee in (("lumi", 16384), ("nemotron", 131072)):
+        label = next(m["label"] for m in cfg["models"] if m["key"] == model)
+        for r in range(50):
+            rows.append(dict(model=model, model_label=label, task="C0", length=0, depth=None, status="ok", strict=1.0,
+                             lenient=1.0, think_leak=False, answered_number=True, hit_distractor=0.0, mv_all=None,
+                             mv_extra=None, n_out=8, finish_reason="stop", n_tokens=95, len_dev=None,
+                             target_depth_actual=None, uid=f"C0-r{r:02d}"))
+        for L in LENGTHS:
+            for d in (0.0, 0.5, 1.0):
+                for r in range(10):
+                    ok = float(L <= knee or rng.random() < 0.3)
+                    rows.append(dict(model=model, model_label=label, task="S", length=L, depth=d, status="ok",
+                                     strict=ok, lenient=ok, think_leak=False, answered_number=True,
+                                     hit_distractor=0.0, mv_all=None, mv_extra=None, n_out=8, finish_reason="stop",
+                                     n_tokens=L - 10, len_dev=-10 / L, target_depth_actual=d,
+                                     uid=f"S-L{L:06d}-d{int(d * 1000):04d}-r{r:02d}"))
+    return pd.DataFrame(rows)
+
+
+def test_summary_lstar_and_recommendation():
+    cfg = load_config("stage1.yaml")
+    cfg["experiment"]["bootstrap"]["n_resamples"] = 200
+    summary = build_summary(_synthetic_df(cfg), cfg)
+    c0 = summary[(summary.model == "lumi") & (summary.task == "C0")].iloc[0]
+    assert c0.acc_strict == 1.0 and c0.ci95_low == 1.0
+    ls = lstar_table(summary, cfg)
+    assert ls["lumi"]["L_S"] == 16384 and ls["nemotron"]["L_S"] == 131072
+    rec = " ".join(recommendation(ls, cfg))
+    assert "Chunks de 4k a 8k" in rec and "pré-treino contínuo curto" in rec
+    ls["lumi"]["L_S"] = 65536
+    assert "Documento inteiro" in " ".join(recommendation(ls, cfg))
+    ls["lumi"]["L_S"] = 4096
+    assert "Reavaliar" in " ".join(recommendation(ls, cfg))
+
+
+def test_model_memory_matches_spec(tiny_tok_dir):
+    mem = model_memory(tiny_tok_dir / "config.json")
+    assert mem["attention_layers"] == 4 and mem["mamba_layers"] == 21 and mem["mlp_layers"] == 17
+    assert mem["kv_bytes_per_token"] == 16 * 1024
+    assert abs(mem["mamba_state_mb_per_seq"] - 82.6) < 0.1
+    assert mem["time_step_limit"][1] == float("inf")
+    assert not mem["has_rope_keys"]
+
+
+def test_queue_claims_are_exclusive_and_resettable(tmp_path):
+    index = [{"uid": f"p{i}", "n_tokens": n} for i, n in enumerate([100, 50, 400, 300, 10, 10])]
+    q = tmp_path / "q"
+    n = workqueue.create_chunks(q, index, chunk_tokens=400, max_prompts=3)
+    assert n == 3  # [400] [300+100] [50+10+10]
+    assert workqueue.create_chunks(q, index, 400, 3) == n  # não recria
+    first = workqueue.claim(q, "gpu0")
+    second = workqueue.claim(q, "gpu1")
+    assert first[1]["chunk"] != second[1]["chunk"]
+    assert first[1]["items"] == [2]  # o mais longo primeiro
+    workqueue.complete(first[0])
+    assert workqueue.reset_running(q, "gpu1") == 1
+    st = workqueue.status(q)
+    assert st["done"] == 1 and st["todo"] == 2 and st["run"] == 0 and st["prompts_total"] == 6
+    claimed = set()
+    while (c := workqueue.claim(q, "gpu2")) is not None:
+        claimed.add(c[1]["chunk"])
+        workqueue.complete(c[0])
+    assert len(claimed) == 2 and workqueue.status(q)["done"] == 3

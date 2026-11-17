@@ -1,0 +1,77 @@
+# Jobs no cluster (Sauron)
+
+Descritores para rodar a Etapa 1 pelo gerenciador de filas Sauron. Cada job usa a
+imagem oficial `vllm/vllm-openai:v0.29.0` e só chama o `run_stage1.sh` dentro dela.
+Tudo o que é gerado fica dentro da pasta do clone (`results/`, `data/`, `work/`,
+`logs/`, `diagnostics/`), que é a pasta de trabalho do job.
+
+| Job | Arquivos | GPUs | `max_time` | Para quê |
+|---|---|---|---|---|
+| Smoke | `smoke.yaml` + `smoke.sh` | 1 | 1h | Validar tudo em todos os comprimentos (até 261k) e estimar o tempo da execução completa |
+| Completo | `full.yaml` + `full.sh` | 4 | 6h | Os 5.220 prompts |
+| Diagnóstico | `diagnose.yaml` + `diagnose.sh` | 1 | 15m | Empacotar logs, versões e o estado da GPU num `.tar.gz` |
+
+`vram: 160` força a classe de GPU de ~179 GB (B200). O modelo cabe em placas
+menores, mas assim os números de desempenho saem sempre do mesmo hardware.
+
+## Passo a passo
+
+```bash
+# 1. Na sessão de login: clonar na pasta de trabalho
+ssh <usuario>@<endereço-do-login>
+cd ~/workspace
+git clone <url-do-repositório> lumi-inference
+cd lumi-inference
+
+# 2. (opcional) token do Hugging Face, só para limites de taxa — nunca no YAML
+echo "HF_TOKEN=hf_xxx" > .env
+
+# 3. Smoke (envie sempre da raiz do clone)
+sauron submit -c jobs/smoke.yaml jobs/smoke.sh
+sauron logs <job> -f
+```
+
+Quando o smoke terminar, leia `results/<data>_smoke/REPORT.md`:
+
+- **Seção 4 (gates):** os gates G1 a G6 devem estar ✅ para os dois modelos. Se o C0 (G2) falhar, pare e investigue antes da execução completa.
+- **Seção 5 (estimativa):** traz o tempo previsto da execução completa com 1, 2, 4 e 8 GPUs. Ajuste `gpus` e `max_time` em `jobs/full.yaml` com folga, sem exagero, porque o `max_time` entra na estimativa de espera da fila.
+
+```bash
+# 4. Execução completa
+sauron submit -c jobs/full.yaml jobs/full.sh
+sauron logs <job> -f
+```
+
+O log principal mostra o progresso a cada minuto (prompts concluídos, % dos
+tokens e ETA). Os detalhes ficam em `results/<run_id>/logs/`.
+
+## Se algo falhar
+
+- **Retomada:** os lotes concluídos ficam gravados. Reenviar o mesmo job (ou usar
+  `sauron retry <job>` dentro do prazo) **retoma automaticamente** a última execução
+  incompleta. Para começar do zero, acrescente `env: {FRESH: "1"}` ao YAML.
+- **Diagnóstico:** `sauron submit -c jobs/diagnose.yaml jobs/diagnose.sh`. Sem GPU,
+  dá também para rodar `bash run_stage1.sh diagnose` direto na sessão de login. O
+  pacote sai em `diagnostics/diag_<data>.tar.gz`; copie-o para a sua máquina:
+  `scp <usuario>@<endereço-do-login>:~/workspace/lumi-inference/diagnostics/diag_*.tar.gz .`
+- Se o `sauron submit` reclamar do caminho `jobs/...`, copie o par de arquivos para
+  a raiz do clone (`cp jobs/smoke.* .`) e envie de lá.
+
+## Trazer os resultados
+
+O cluster não tem backup. Copie a pasta da execução para fora:
+
+```bash
+rsync -rlt <usuario>@<endereço-do-login>:~/workspace/lumi-inference/results/<run_id> ./results/
+```
+
+Para refazer a análise localmente (sem GPU), rode `./run_stage1.sh analyze <run_id>`
+na raiz do clone local, com um Python ≥ 3.12. Na primeira vez, o script cria um
+venv e instala `requirements-dev.txt`.
+
+## Limpeza
+
+`work/` guarda os prompts pré-tokenizados (~0,7 GB) e a fila de cada execução, e
+pode ser apagado depois que a execução terminar. `data/haystack_pt.parquet` é
+reaproveitado entre execuções. Os pesos dos modelos ficam no cache compartilhado
+do cluster (`HF_HOME`), fora da pasta do projeto.

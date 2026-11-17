@@ -1,0 +1,27 @@
+# Smoke: o mesmo pipeline da execução completa, com poucas repetições,
+# mas passando por TODOS os comprimentos (inclusive 261120) e pelas 4 tarefas.
+# As sementes são as mesmas da execução completa: os prompts do smoke são um
+# subconjunto exato dos prompts completos.
+inherit: stage1.yaml
+
+experiment:
+  tasks:
+    C0:
+      reps: 5
+    S:
+      depths: [0.0, 0.5, 1.0]
+      reps: 1
+    MK:
+      depths: [0.5]
+      reps: 1
+    MV:
+      depths: [0.5]
+      reps: 1
+  bootstrap:
+    n_resamples: 200
+
+perf:
+  reps: 1
+
+vllm:
+  chunk_tokens: 2000000

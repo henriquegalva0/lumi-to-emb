@@ -1,0 +1,25 @@
+# Saídas geradas pelos experimentos (ficam no diretório de trabalho, nunca no Git)
+/results/
+/data/
+/work/
+/logs/
+/diagnostics/
+/hf_cache/
+
+# Ambientes e caches locais
+/.venv/
+/.pydeps/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Segredos
+.env
+
+# Material interno (não publicar)
+/sauron-kit/
+/CLAUDE.md
+
+# Sistema
+.DS_Store
