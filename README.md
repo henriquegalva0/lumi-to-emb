@@ -23,23 +23,7 @@ O L\* define o desenho do embedder nas etapas seguintes: se ele codifica documen
 
 ## 1. Contexto
 
-O objetivo do projeto é transformar o Lumi-4B, um modelo de linguagem de 4B parâmetros focado em português brasileiro, num modelo de *embeddings* para RAG. O trabalho tem cinco etapas, e este repositório cobre a primeira.
-
-| Etapa | O que é | Neste repositório |
-|---|---|---|
-| **1. Janela de contexto** | Medir o L\* do Lumi e do modelo-base | ✅ |
-| 2. Decisão | Escolher o desenho do embedder a partir do L\* (tabela abaixo) | regra automática no relatório |
-| 3. Dados | Pares e trios (consulta, positivo, negativos difíceis) em PT-BR e documentos longos brasileiros | — |
-| 4. Treino | LoRA contrastivo (InfoNCE), *pooling* no último token (EOS), currículo de comprimento até L\* | — |
-| 5. Avaliação | Recuperação em PT, documento inteiro vs. *chunking*, eficiência e RAG ponta a ponta | — |
-
-Regra de decisão da Etapa 2:
-
-| L\* do Lumi | Desenho do embedder |
-|---|---|
-| ≥ 32k tokens | Documento inteiro, até L\* |
-| ≈ 8k tokens (8k ≤ L\* < 32k) | *Chunks* de 4k a 8k tokens |
-| < 8k tokens | Reavaliar o plano |
+O objetivo do projeto é transformar o Lumi-4B, um modelo de linguagem de 4B parâmetros focado em português brasileiro, num modelo de *embeddings* para RAG. O trabalho tem algumas etapas, e este repositório cobre a primeira.
 
 **Hipótese.** O Lumi é um modelo híbrido Mamba-2 + atenção, **sem codificação posicional explícita** (não há RoPE). Modelos assim tendem a generalizar além do comprimento visto no treino ([Waleffe et al., 2024](https://arxiv.org/abs/2406.07887)). A base anuncia contexto de até 262k tokens e 91,1 no RULER a 128k. O Lumi, porém, passou por pré-treino contínuo (50B tokens) em **janelas de 8.192 tokens**. Não se sabe se ele manteve o contexto longo da base.
 
