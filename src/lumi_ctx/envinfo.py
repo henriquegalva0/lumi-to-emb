@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata as md
 import json
+import math
 import os
 import platform
 import re
@@ -57,6 +58,31 @@ def visible_gpu_ids(limit: str | int = "auto") -> list[str]:
     return ids
 
 
+def available_cpus() -> int:
+    """CPUs que o job pode usar de fato (afinidade e cota do cgroup), não as do host inteiro."""
+    try:
+        n = len(os.sched_getaffinity(0))
+    except AttributeError:
+        n = os.cpu_count() or 1
+    quotas = []
+    try:  # cgroup v2
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()[:2]
+        if quota != "max":
+            quotas.append(int(quota) / int(period))
+    except (OSError, ValueError):
+        pass
+    try:  # cgroup v1
+        quota = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text())
+        period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text())
+        if quota > 0:
+            quotas.append(quota / period)
+    except (OSError, ValueError):
+        pass
+    for q in quotas:
+        n = min(n, max(1, math.ceil(q)))
+    return max(1, n)
+
+
 def package_versions() -> dict:
     out = {}
     for p in PACKAGES:
@@ -104,6 +130,7 @@ def collect_env() -> dict:
         "driver_cuda_version": driver_cuda_version(),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "cpu_count": os.cpu_count(),
+        "cpu_available": available_cpus(),
         "memory_total_gb": memory_total_gb(),
         "workdir": str(workdir()),
         "hf_home": os.environ.get("HF_HOME"),

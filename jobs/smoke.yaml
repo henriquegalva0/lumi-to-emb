@@ -6,8 +6,8 @@ name: lumi-ctx-smoke
 image: vllm/vllm-openai:v0.29.0
 gpus: 1
 vram: 160            # acima de 89 GB: só cabe na classe de ~179 GB (B200)
-cpus: 16
-memory: 64g
+cpus: 4              # construção dos prompts + 1 processo vLLM
+memory: 32g          # pico esperado bem abaixo disso; confira "ram pico" no sauron status
 max_time: 1h
 
 # subpasta de ~/workspace com o clone; o job já começa dentro dela

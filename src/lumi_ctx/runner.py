@@ -29,7 +29,7 @@ from .common import (
     write_yaml,
 )
 from .engine import ENGINE_INIT_FAILED
-from .envinfo import Deviations, collect_env, record_static_deviations, visible_gpu_ids
+from .envinfo import Deviations, available_cpus, collect_env, record_static_deviations, visible_gpu_ids
 from .haystack import build_pool, load_pool
 from .prompts import (
     build_prompt_set,
@@ -62,7 +62,7 @@ def ensure_hf_home() -> None:
 def build_workers(cfg: dict) -> int:
     value = cfg.get("build", {}).get("workers", "auto")
     if value == "auto":
-        return max(1, min(os.cpu_count() or 1, 16))
+        return max(1, min(available_cpus(), 16))
     return max(1, int(value))
 
 

@@ -4,6 +4,7 @@ name: lumi-ctx-diagnose
 image: vllm/vllm-openai:v0.29.0
 gpus: 1
 vram: 160
+cpus: 1
 memory: 8g
 max_time: 15m
 

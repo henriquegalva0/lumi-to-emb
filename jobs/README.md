@@ -14,19 +14,29 @@ Tudo o que é gerado fica dentro da pasta do clone (`results/`, `data/`, `work/`
 `vram: 160` força a classe de GPU de ~179 GB (B200). O modelo cabe em placas
 menores, mas assim os números de desempenho saem sempre do mesmo hardware.
 
+`workspace: lumi-inference` é a pasta em que o job começa. O clone pode ser essa
+pasta ou uma subpasta dela (ex.: `~/workspace/lumi-inference/lumi-to-emb`): os
+`jobs/*.sh` procuram o `run_stage1.sh` um nível abaixo. Os resultados ficam dentro
+do clone (`<clone>/results/`).
+
+CPU e RAM: o smoke pede 4 CPUs e 32 GB; o completo, 8 CPUs e 64 GB. Depois do
+smoke, `sauron status <job>` mostra o pico real (`ram pico`): para o completo,
+some ~10 GB por GPU extra a esse pico.
+
 ## Passo a passo
 
 ```bash
 # 1. Na sessão de login: clonar na pasta de trabalho
 ssh <usuario>@<endereço-do-login>
 cd ~/workspace
-git clone <url-do-repositório> lumi-inference
-cd lumi-inference
+git clone <url-do-repositório> lumi-inference   # ou numa subpasta: lumi-inference/<nome>
+cd lumi-inference                                # (ou cd lumi-inference/<nome>)
 
 # 2. (opcional) token do Hugging Face, só para limites de taxa — nunca no YAML
 echo "HF_TOKEN=hf_xxx" > .env
 
-# 3. Smoke (envie sempre da raiz do clone)
+# 3. Smoke (envie da raiz do clone; um job de cada vez, pois smoke e completo
+#    compartilham .venv/ e data/)
 sauron submit -c jobs/smoke.yaml jobs/smoke.sh
 sauron logs <job> -f
 ```

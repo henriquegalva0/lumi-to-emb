@@ -6,8 +6,8 @@ name: lumi-ctx-full
 image: vllm/vllm-openai:v0.29.0
 gpus: 4
 vram: 160            # acima de 89 GB: só cabe na classe de ~179 GB (B200)
-cpus: 32
-memory: 128g
+cpus: 8              # 1 processo vLLM por GPU + orquestrador
+memory: 64g          # ~12 GB por processo vLLM; ajuste pelo "ram pico" do smoke × nº de GPUs
 max_time: 6h
 
 # subpasta de ~/workspace com o clone; o job já começa dentro dela
