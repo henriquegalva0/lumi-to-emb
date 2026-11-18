@@ -10,6 +10,10 @@ experiment:
   min_needle_gap: 0.02           # distância mínima entre agulhas (fração da extensão do palheiro)
   threshold: 0.90                # critério de L*
   c0_gate: 0.95                  # gate do controle sem palheiro
+  # G3 (vazamento de <think> = erro de configuração) vale para o C0 e para L <= este valor
+  # (dentro da janela de treino do Lumi). Acima, <think> aparece como parte do colapso do
+  # modelo em contexto longo e é reportado como modo de falha, não como erro de configuração.
+  think_gate_max_length: 8192
   tasks:
     C0:
       reps: 50

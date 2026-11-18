@@ -73,11 +73,15 @@ class VLLMEngine:
     def _params(self, max_tokens: int, ignore_eos: bool = False):
         from vllm import SamplingParams
 
+        # ignore_eos=True só é usado no benchmark: aí a geração tem de ir até max_tokens.
+        # ignore_eos sozinho não basta (os stop_token_ids continuam valendo); min_tokens
+        # bloqueia EOS e tokens de parada até atingir o mínimo.
         return SamplingParams(
             temperature=self.temperature,
             max_tokens=int(max_tokens),
+            min_tokens=int(max_tokens) if ignore_eos else 0,
             seed=self.seed,
-            stop_token_ids=self.stop_ids,
+            stop_token_ids=None if ignore_eos else self.stop_ids,
             skip_special_tokens=False,
             ignore_eos=ignore_eos,
         )

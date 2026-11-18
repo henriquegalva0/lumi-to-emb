@@ -57,12 +57,16 @@ def run_perf(engine, pset, mm, cfg: dict, model_key: str, label: str, out_path) 
             t2 = time.perf_counter()
             n_gen = len(res.token_ids) or (n_dec + 1)
             prefill = t1 - t0
-            decode_time = max((t2 - t1) - prefill, 1e-9)
+            decode_time = (t2 - t1) - prefill
+            valid = n_gen >= n_dec + 1 and decode_time > 0
+            if not valid:
+                log.warning("perf L=%d rep=%d: medida de decode inválida (%d tokens, %.4fs); registrada como NaN",
+                            length, r, n_gen, decode_time)
             rows.append(
                 {
                     "model": model_key, "worker": label, "length": length, "n_tokens": row["n_tokens"],
                     "uid": row["uid"], "rep": r, "prefill_s": prefill, "total_s": t2 - t1,
-                    "gen_tokens": n_gen, "decode_tok_s": (n_gen - 1) / decode_time,
+                    "gen_tokens": n_gen, "decode_tok_s": (n_gen - 1) / decode_time if valid else float("nan"),
                 }
             )
             log.info("perf L=%d rep=%d prefill=%.3fs decode=%.1f tok/s", length, r, prefill, rows[-1]["decode_tok_s"])

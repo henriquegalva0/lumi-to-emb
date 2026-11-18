@@ -8,7 +8,7 @@ Tudo o que é gerado fica dentro da pasta do clone (`results/`, `data/`, `work/`
 | Job | Arquivos | GPUs | `max_time` | Para quê |
 |---|---|---|---|---|
 | Smoke | `smoke.yaml` + `smoke.sh` | 1 | 1h | Validar tudo em todos os comprimentos (até 261k) e estimar o tempo da execução completa |
-| Completo | `full.yaml` + `full.sh` | 4 | 6h | Os 5.220 prompts |
+| Completo | `full.yaml` + `full.sh` | 1 | 3h | Os 5.220 prompts (~1,6 h estimadas pelo smoke) |
 | Diagnóstico | `diagnose.yaml` + `diagnose.sh` | 1 | 15m | Empacotar logs, versões e o estado da GPU num `.tar.gz` |
 
 `vram: 160` força a classe de GPU de ~179 GB (B200). O modelo cabe em placas
@@ -19,9 +19,14 @@ pasta ou uma subpasta dela (ex.: `~/workspace/lumi-inference/lumi-to-emb`): os
 `jobs/*.sh` procuram o `run_stage1.sh` um nível abaixo. Os resultados ficam dentro
 do clone (`<clone>/results/`).
 
-CPU e RAM: o smoke pede 4 CPUs e 32 GB; o completo, 8 CPUs e 64 GB. Depois do
-smoke, `sauron status <job>` mostra o pico real (`ram pico`): para o completo,
-some ~10 GB por GPU extra a esse pico.
+CPU e RAM: os dois pedem 4 CPUs e 32 GB (o smoke teve pico de 11,4 GB). Depois do
+smoke, `sauron status <job>` mostra o pico real (`ram pico`); com mais GPUs no
+completo, some ~10 GB por GPU extra a esse pico.
+
+Cota: cada B200 gasta ~179 GB da cota de VRAM (`sauron whoami`). Com 268 GB de
+cota, só cabe uma GPU por job; pedir mais deixa o job parado na fila. O código usa
+quantas GPUs o job tiver (um processo vLLM por GPU), então basta mudar `gpus:` se a
+cota aumentar.
 
 ## Passo a passo
 

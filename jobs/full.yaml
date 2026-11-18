@@ -1,14 +1,16 @@
 # Execução completa da Etapa 1: 2610 prompts por modelo (5220 no total).
-# Ajuste gpus e max_time pela estimativa que o smoke grava no REPORT.md (seção 5).
-# Se o job cair ou estourar o tempo, reenviar retoma de onde parou.
+# No smoke, 1 B200 deu ~100k tokens/s de prefill em lote: a estimativa é ~1,6 h
+# (seção 5 do REPORT.md do smoke). Se o job cair ou estourar o tempo, reenviar
+# retoma de onde parou.
+# 1 GPU: cada B200 gasta ~179 GB da cota; com cota de 268 GB, só cabe uma por vez.
 # Envie da raiz do repositório:  sauron submit -c jobs/full.yaml jobs/full.sh
 name: lumi-ctx-full
 image: vllm/vllm-openai:v0.29.0
-gpus: 4
+gpus: 1
 vram: 160            # acima de 89 GB: só cabe na classe de ~179 GB (B200)
-cpus: 8              # 1 processo vLLM por GPU + orquestrador
-memory: 64g          # ~12 GB por processo vLLM; ajuste pelo "ram pico" do smoke × nº de GPUs
-max_time: 6h
+cpus: 4              # construção dos prompts + 1 processo vLLM
+memory: 32g          # o smoke teve pico de 11,4 GB com 1 GPU
+max_time: 3h         # ~1,6 h estimadas, com folga
 
 # subpasta de ~/workspace com o clone; o job já começa dentro dela
 workspace: lumi-inference

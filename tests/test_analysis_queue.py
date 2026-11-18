@@ -110,3 +110,39 @@ def test_queue_claims_are_exclusive_and_resettable(tmp_path):
         claimed.add(c[1]["chunk"])
         workqueue.complete(c[0])
     assert len(claimed) == 2 and workqueue.status(q)["done"] == 3
+
+
+def test_g3_scope_and_failure_table():
+    """<think> em contexto longo (colapso) não reprova o G3; no C0/curto, reprova."""
+    from lumi_ctx.analysis import compute_gates, failure_table
+
+    cfg = load_config("stage1.yaml")
+    cfg["experiment"]["bootstrap"]["n_resamples"] = 50
+    df = _synthetic_df(cfg)
+    df["finish_reason"] = "stop"
+    long_ = (df.model == "lumi") & (df.length == 261120)
+    df.loc[long_, ["think_leak", "strict", "answered_number"]] = [True, 0.0, False]
+    df.loc[long_, "finish_reason"] = "length"
+    info = {"template_checks": {"lumi": {"ok": True}, "nemotron": {"ok": True}}}
+    summary = build_summary(df, cfg)
+    g3 = {m: next(g for g in gs if g["id"] == "G3") for m, gs in compute_gates(df, summary, info, cfg).items()}
+    assert g3["lumi"]["ok"] and "30 acima" in g3["lumi"]["detalhe"]
+    ft = failure_table(df, cfg)
+    row = ft[(ft.model == "lumi") & (ft.length == 261120)].iloc[0]
+    assert row.com_think == 1.0 and row.cortada_no_limite == 1.0 and row.sem_numero == 1.0
+    df.loc[(df.model == "lumi") & (df.task == "C0") & (df.uid == "C0-r00"), "think_leak"] = True
+    g3 = next(g for g in compute_gates(df, build_summary(df, cfg), info, cfg)["lumi"] if g["id"] == "G3")
+    assert not g3["ok"]
+
+
+def test_perf_table_discards_incomplete_decode():
+    from lumi_ctx.analysis import perf_table
+
+    cfg = load_config("stage1.yaml")
+    rows = [
+        {"model": "lumi", "length": 2048, "n_tokens": 2020, "rep": 0, "prefill_s": 0.04, "gen_tokens": 8, "decode_tok_s": 7e9},
+        {"model": "lumi", "length": 4096, "n_tokens": 4080, "rep": 0, "prefill_s": 0.05, "gen_tokens": 129, "decode_tok_s": 400.0},
+    ]
+    t = perf_table(rows, {}, cfg)
+    assert math.isnan(t.loc[t.length == 2048, "decode_tok_s"].iloc[0])
+    assert t.loc[t.length == 4096, "decode_tok_s"].iloc[0] == 400.0

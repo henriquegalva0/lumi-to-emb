@@ -361,7 +361,8 @@ def _worker_build(spec: dict) -> tuple[dict, np.ndarray]:
 
 
 def prompt_set_key(cfg: dict, pool: HaystackPool, tok) -> str:
-    exp = {k: v for k, v in cfg["experiment"].items() if k not in ("bootstrap", "threshold", "c0_gate")}
+    analysis_only = ("bootstrap", "threshold", "c0_gate", "think_gate_max_length")
+    exp = {k: v for k, v in cfg["experiment"].items() if k not in analysis_only}
     return stable_hash(
         {
             "builder": BUILDER_VERSION,

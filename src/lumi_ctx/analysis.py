@@ -224,10 +224,32 @@ def paired_tests(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return out.sort_values(["_t", "length"]).drop(columns="_t").reset_index(drop=True)
 
 
+def failure_table(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """Como o modelo erra, por comprimento (S, MK e MV juntos)."""
+    ok = df[(df["status"] == "ok") & (df["task"] != "C0")].copy()
+    if ok.empty:
+        return pd.DataFrame()
+    ok["wrong"] = ok["strict"].astype(float) < 1.0
+    ok["cut"] = ok["finish_reason"] == "length"
+    ok["no_num"] = ~ok["answered_number"].astype(bool)
+    ok["think"] = ok["think_leak"].astype(bool)
+    ok["distr"] = ok["hit_distractor"].fillna(0).astype(float) > 0
+    t = ok.groupby(["model", "length"]).agg(
+        n=("uid", "size"), erro=("wrong", "mean"), cortada_no_limite=("cut", "mean"),
+        sem_numero=("no_num", "mean"), com_think=("think", "mean"), numero_distrator=("distr", "mean"),
+    ).reset_index()
+    order = {m["key"]: i for i, m in enumerate(cfg["models"])}
+    t["_m"] = t["model"].map(order)
+    return t.sort_values(["_m", "length"]).drop(columns="_m").reset_index(drop=True)
+
+
 def perf_table(perf_rows: list[dict], info: dict, cfg: dict) -> pd.DataFrame:
     if not perf_rows:
         return pd.DataFrame()
     p = pd.DataFrame(perf_rows)
+    need = int(cfg.get("perf", {}).get("decode_tokens", 128)) + 1
+    bad = (p["gen_tokens"] < need) | ~np.isfinite(p["decode_tok_s"].astype(float)) | (p["decode_tok_s"] > 1e6)
+    p.loc[bad, "decode_tok_s"] = np.nan  # medida incompleta (parou antes) ou degenerada
     t = p.groupby(["model", "length"]).agg(
         n_tokens=("n_tokens", "first"), reps=("rep", "size"),
         prefill_s=("prefill_s", "median"), prefill_s_min=("prefill_s", "min"), prefill_s_max=("prefill_s", "max"),
@@ -259,7 +281,11 @@ def compute_gates(df: pd.DataFrame, summary: pd.DataFrame, info: dict, cfg: dict
         stats = info.get("prompt_sets", {}).get(k, {}).get("stats", {})
         c0 = summary[(summary["model"] == k) & (summary["task"] == "C0")]
         c0_acc = float(c0["acc_strict"].iloc[0]) if len(c0) else math.nan
-        leaks = int(ok["think_leak"].astype(bool).sum()) if len(ok) else 0
+        think_max = int(cfg["experiment"].get("think_gate_max_length", 8192))
+        leak = ok["think_leak"].astype(bool) if len(ok) else pd.Series(dtype=bool)
+        in_scope = (ok["task"] == "C0") | (ok["length"] <= think_max) if len(ok) else pd.Series(dtype=bool)
+        leaks = int((leak & in_scope).sum()) if len(ok) else 0
+        leaks_out = int((leak & ~in_scope).sum()) if len(ok) else 0
         dev = g.loc[g["task"] != "C0", "len_dev"].abs()
         over = int((g.loc[g["task"] != "C0", "n_tokens"] > g.loc[g["task"] != "C0", "length"]).sum())
         missing = int((g["status"] != "ok").sum())
@@ -268,7 +294,8 @@ def compute_gates(df: pd.DataFrame, summary: pd.DataFrame, info: dict, cfg: dict
              "detalhe": f"prompt termina em {tmpl.get('generation_suffix_off', '?')[-30:]!r}"},
             {"id": "G2", "nome": f"C0 (sem palheiro) ≥ {c0_gate:.0%}", "ok": bool(c0_acc >= c0_gate),
              "detalhe": f"acurácia estrita {c0_acc:.3f}" if not math.isnan(c0_acc) else "sem C0"},
-            {"id": "G3", "nome": "Nenhum vazamento de <think>", "ok": leaks == 0, "detalhe": f"{leaks} saída(s) com <think>"},
+            {"id": "G3", "nome": f"Nenhum <think> no C0 nem em L ≤ {plots.fmt_len(think_max)}", "ok": leaks == 0,
+             "detalhe": f"{leaks} no escopo; {leaks_out} acima de {plots.fmt_len(think_max)} (modo de falha, seção 2)"},
             {"id": "G4", "nome": f"Comprimento dentro de ±{tol:.0%} e ≤ L", "ok": bool((dev <= tol).all()) and over == 0,
              "detalhe": f"desvio máx. {dev.max():.4f}; {over} acima do alvo" if len(dev) else "-"},
             {"id": "G5", "nome": "Número da agulha ausente do palheiro", "ok": True,
@@ -386,7 +413,7 @@ def _md_table(headers: list[str], rows: list[list]) -> str:
 
 def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataFrame, lstars: dict,
                  paired: pd.DataFrame, gates: dict, perf: pd.DataFrame, estimate: pd.DataFrame | None,
-                 depth_tab: pd.DataFrame, deviations: list[dict]) -> None:
+                 depth_tab: pd.DataFrame, deviations: list[dict], failures: pd.DataFrame | None = None) -> None:
     lengths = list(cfg["experiment"]["lengths"])
     thr = cfg["experiment"]["threshold"]
     models = cfg["models"]
@@ -449,6 +476,19 @@ def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataF
              "McNemar exato. " + ("Os prompts são idênticos token a token nos dois modelos (mesmo tokenizer e template)."
                                   if info.get("paired_identical") else
                                   "Os prompts usam as mesmas sementes, mas não são idênticos token a token.") + "\n")
+    if failures is not None and not failures.empty:
+        L.append("**Modos de falha** (S, MK e MV juntos; fração dos prompts de cada comprimento)\n")
+        rows = []
+        for _, r in failures.iterrows():
+            label = next(m["label"] for m in models if m["key"] == r["model"])
+            rows.append([label, plots.fmt_len(int(r["length"])), int(r["n"]), f"{r['erro']:.2f}",
+                         f"{r['cortada_no_limite']:.2f}", f"{r['sem_numero']:.2f}", f"{r['com_think']:.2f}",
+                         f"{r['numero_distrator']:.2f}"])
+        L.append(_md_table(["Modelo", "L", "n", "Erro (estrito)", "Cortada no limite (laço)", "Sem número",
+                            "Com <think>", "Nº distrator (MK)"], rows))
+        L.append("\nUma resposta correta tem poucos tokens; ser cortada no limite de `max_tokens` indica laço ou "
+                 "degeneração. `<think>` fora do C0/contextos curtos aparece como parte desse colapso, não como erro "
+                 "de configuração (o gate G3 cobre o C0 e os contextos curtos). Ver `failure_modes.csv`.\n")
     L.append("![Acurácia vs. comprimento](acc_vs_len.png)\n")
     for m in models:
         L.append(f"![Heatmap S — {m['label']}](heatmap_S_{m['key']}.png)\n")
@@ -499,9 +539,11 @@ def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataF
         for _, r in perf.iterrows():
             label = next(m["label"] for m in models if m["key"] == r["model"])
             rows.append([label, plots.fmt_len(int(r["length"])), f"{r['prefill_s']:.3f}", _int(r["prefill_tok_s"]),
-                         f"{r['decode_tok_s']:.1f}", f"{r['kv_cache_gib_theoretical']:.2f}"])
+                         "–" if pd.isna(r["decode_tok_s"]) else f"{r['decode_tok_s']:.1f}",
+                         f"{r['kv_cache_gib_theoretical']:.2f}"])
         L.append(_md_table(["Modelo", "L", "Prefill (s)", "Prefill (tok/s)", "Decode (tok/s)", "KV teórico (GiB)"], rows))
-        L.append("\nMedido com lote de 1 (latência isolada), mediana das repetições; ver `perf.csv`.\n")
+        L.append("\nMedido com lote de 1 (latência isolada), mediana das repetições; ver `perf.csv`. "
+                 "\"–\" = nenhuma medida de decode válida (a geração parou antes dos tokens pedidos).\n")
         L.append("![Prefill](perf.png)\n")
     else:
         L.append("Sem medidas de desempenho nesta execução.\n")
@@ -541,7 +583,7 @@ def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataF
         L.append(_md_table(hdr, rows) + "\n")
     if deviations:
         L.append(f"- {len(deviations)} desvio(s) da especificação registrado(s) em `DESVIOS.md`.")
-    L.append("\nArquivos: `summary.csv`, `by_depth_S.csv`, `paired_tests.csv`, `perf.csv`, `lstar.json`, "
+    L.append("\nArquivos: `summary.csv`, `by_depth_S.csv`, `paired_tests.csv`, `failure_modes.csv`, `perf.csv`, `lstar.json`, "
              "`raw/results.jsonl` (uma linha por prompt e modelo), `config_used.yaml`, `env.json`, `logs/`.\n")
     (rdir / "REPORT.md").write_text("\n".join(L) + "\n", encoding="utf-8")
 
@@ -624,9 +666,25 @@ def analyze_run(run_id: str) -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("Não foi possível estimar a execução completa: %s", exc)
 
+    failures = failure_table(df, cfg)
+    failures.to_csv(rdir / "failure_modes.csv", index=False, float_format="%.4f")
     gates = compute_gates(df, summary, info, cfg)
     write_json(rdir / "gates.json", gates)
     dev = Deviations(rdir / "deviations.jsonl")
+    think_max = int(cfg["experiment"].get("think_gate_max_length", 8192))
+    ok_rows = df[df["status"] == "ok"]
+    out_scope = ok_rows[(ok_rows["task"] != "C0") & (ok_rows["length"] > think_max)]
+    n_out = int(out_scope["think_leak"].astype(bool).sum())
+    if n_out:
+        lens = sorted({plots.fmt_len(int(x)) for x in out_scope.loc[out_scope["think_leak"].astype(bool), "length"]})
+        dev.add(
+            "think-gate-scope",
+            f"Gate G3 restrito ao C0 e a L ≤ {plots.fmt_len(think_max)}; {n_out} saída(s) com <think> acima disso "
+            f"({', '.join(lens)}) contadas como modo de falha.",
+            "A especificação trata <think> na saída como erro de configuração, mas o template está verificado (G1) "
+            "e os <think> só aparecem em contextos longos, em saídas degeneradas (laços até max_tokens).",
+            "Nenhum sobre a acurácia: essas saídas já pontuam 0. A taxa aparece em 'Modos de falha' no relatório.",
+        )
     missing = int((df["status"] != "ok").sum())
     if missing:
         dev.add("missing-outputs", f"{missing} prompt(s) sem saída do modelo.", "Falha de worker sem nova tentativa.",
@@ -637,7 +695,7 @@ def analyze_run(run_id: str) -> None:
                 "Palheiro curto para o espaçamento pedido.", "Pequeno.")
     deviations = dev.rows()
     write_deviations(rdir, deviations)
-    write_report(rdir, cfg, info, env, summary, lstars, paired, gates, perf, estimate, depth_tab, deviations)
+    write_report(rdir, cfg, info, env, summary, lstars, paired, gates, perf, estimate, depth_tab, deviations, failures)
 
     for m in cfg["models"]:
         r = lstars.get(m["key"], {})

@@ -163,7 +163,7 @@ A construção leva ~30 s em 10 processos de CPU. O comprimento real de cada pro
 - A saída é decodificada com `skip_special_tokens=False`, para que nenhum `<think>` fique escondido.
 - **Estrita (principal):** o **primeiro** número de 7 dígitos da saída é igual ao esperado. No MV, conta a fração dos 4 valores esperados entre os números de 7 dígitos da saída.
 - **Leniente:** o número esperado aparece em qualquer ponto da saída, aceitando também separadores de milhar. No MV, conta a fração dos valores que aparecem.
-- **`thinking_leak`:** a saída contém `<think>` ou `</think>`, em texto ou como token. Isso indica erro de configuração (gate G3).
+- **`thinking_leak`:** a saída contém `<think>` ou `</think>`, em texto ou como token. No C0 e em contextos curtos, isso indicaria erro de configuração (gate G3). Em contextos longos, aparece como parte do colapso do modelo (laços como `<think></think><think>…` até `max_tokens`) e é contado como modo de falha.
 - **Diagnósticos por prompt:**
   - se a saída tinha algum número;
   - no MK, se o modelo devolveu o número de uma cidade distratora;
@@ -203,7 +203,7 @@ Exigir o limiar em todos os comprimentos menores evita que um ponto isolado acim
 |---|---|
 | G1 | O template desliga o raciocínio: o prompt termina com `<think></think>` fechado e difere do modo com raciocínio |
 | G2 | C0 ≥ 95 % (acurácia estrita) |
-| G3 | Nenhum vazamento de `<think>` nas saídas |
+| G3 | Nenhum `<think>` nas saídas do C0 nem em L ≤ 8k (`think_gate_max_length`), onde ele só pode vir de configuração errada; acima disso, a taxa é reportada como modo de falha |
 | G4 | Todos os prompts com \|desvio\| ≤ 2 % e nenhum acima de L |
 | G5 | Nenhum número de agulha presente por acaso no palheiro (verificado na construção) |
 | G6 | Todas as gerações concluídas |
@@ -272,6 +272,7 @@ Tudo fica em `$LUMI_WORKDIR/results/<run_id>/`, com `run_id` no formato `AAAAMMD
 | `summary.csv` | Uma linha por modelo × tarefa × comprimento (dicionário abaixo) |
 | `by_depth_S.csv` | Acurácia de S por modelo × comprimento × profundidade |
 | `paired_tests.csv` | Comparação pareada Lumi × controle (Δ, vitórias de cada lado, valor-p) |
+| `failure_modes.csv` | Como o modelo erra, por comprimento: resposta cortada no limite (laço), sem número, com `<think>`, número distrator |
 | `lstar.json` | L\*, L\*<sub>estrito</sub>, L\* conservador e L\* leniente por modelo e tarefa |
 | `heatmap_S_<modelo>.png` | Acurácia estrita de S: comprimento × profundidade |
 | `acc_vs_len.png` | Curvas de S, MK e MV dos dois modelos no mesmo gráfico (eixo x em log2, faixas de IC 95 %); `acc_vs_len_panels.png` traz a mesma informação em painéis |
