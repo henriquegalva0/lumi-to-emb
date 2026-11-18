@@ -210,6 +210,7 @@ def run_model_workers(run_id: str, cfg: dict, model_key: str, gpus: list[str], b
             cmd.append("--perf")
         out = open(rdir / "logs" / f"worker_{model_key}_{h.label}.stdout.log", "a", encoding="utf-8")
         h.proc = subprocess.Popen(cmd, env=env, stdout=out, stderr=subprocess.STDOUT, cwd=str(REPO_ROOT))
+        out.close()  # o subprocesso tem a própria cópia do descritor
         h.done = False
         log.info("Worker %s/%s lançado (pid %d, perfil %s%s)", model_key, h.label, h.proc.pid, h.profile,
                  ", com benchmark" if perf else "")

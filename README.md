@@ -210,6 +210,13 @@ Exigir o limiar em todos os comprimentos menores evita que um ponto isolado acim
 
 Se G1, G2, G3 ou G6 falham, o L\* daquele modelo é marcado como não confiável. Se G1 falha, a execução é abortada antes de gerar.
 
+**Recomendação automática.** O relatório aplica a regra de decisão da Etapa 2 (seção 1) ao L\* de S e acrescenta duas ressalvas quando os dados pedem:
+
+- **L\* efetivo:** o menor L\* entre S, MK e MV. Um embedder precisa separar vários fatos parecidos no mesmo documento.
+- **Falta de margem:** quando a acurácia de S cai abaixo de 0,10 no comprimento seguinte ao L\*.
+
+Ele também compara o L\* do Lumi com o do controle, para atribuir a perda ao pré-treino contínuo.
+
 ## 5. Como executar
 
 ### Requisitos
@@ -387,9 +394,57 @@ Cada execução grava seus desvios em `DESVIOS.md`. Os que já são conhecidos:
 
 ## 12. Resultados
 
-<!-- Preencher com a tabela de L* e as figuras de results/<run_id>/REPORT.md da execução completa. -->
+Execução completa `20261118-115243_full`: 5.220 prompts (2.610 por modelo), 1× NVIDIA B200, 84 min, código no commit `86c5a54`. Todos os gates (G1–G6) passaram nos dois modelos e nenhuma geração faltou. O relatório completo, as tabelas e as figuras estão em [`docs/stage1/`](docs/stage1/REPORT.md).
 
-*Em execução.* Esta seção receberá a tabela de L\*, as curvas de acurácia por comprimento e os *heatmaps* da execução completa, copiados de `results/<run_id>/REPORT.md`.
+### L\* por modelo
+
+| Modelo | L\* (S) | L\*<sub>estrito</sub> (S) | L\* conservador (S) | L\* (MK) | L\* (MV) | C0 |
+|---|---|---|---|---|---|---|
+| **Lumi-4B** | **32k** (32.768) | 32k | 32k | **16k** (16.384) | **16k** | 1,00 |
+| Nemotron-3-Nano-4B (controle) | 255k (261.120) | 255k | 255k | 255k | 128k (131.072) | 1,00 |
+
+![Acurácia estrita por comprimento](docs/stage1/acc_vs_len.png)
+
+### Acurácia estrita média [IC 95 %] nos comprimentos decisivos
+
+| Tarefa | Modelo | 16k | 32k | 64k | 128k | 255k |
+|---|---|---|---|---|---|---|
+| S | Lumi-4B | 1,00 | 0,99 [0,98; 1,00] | 0,00 | 0,00 | 0,00 |
+| S | Controle | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 |
+| MK | Lumi-4B | 1,00 | 0,58 [0,46; 0,68] | 0,04 | 0,00 | 0,00 |
+| MK | Controle | 1,00 | 1,00 | 1,00 | 0,98 | 0,98 |
+| MV | Lumi-4B | 0,94 [0,91; 0,97] | 0,65 [0,58; 0,70] | 0,01 | 0,00 | 0,00 |
+| MV | Controle | 0,99 | 0,98 | 0,96 | 0,92 | 0,85 [0,81; 0,90] |
+
+Até 8k os dois modelos ficam entre 0,98 e 1,00 nas três tarefas. Tabelas completas: [`summary.csv`](docs/stage1/summary.csv) e [`paired_tests.csv`](docs/stage1/paired_tests.csv).
+
+### O que os dados mostram
+
+- **O Lumi recupera uma agulha isolada até 32k e colapsa a partir de 64k.** Em S, a acurácia passa de 0,99 em 32k para 0,00 em 64k. Não é uma degradação gradual: em 64k, 97 % das respostas não têm nenhum número de 7 dígitos e 64 % entram em laço até o limite de tokens. De 64k em diante aparecem saídas como `1000000000…`, `</texto></texto>…`, respostas em inglês e `<think></think><think>…`. Os detalhes estão em [`failure_modes.csv`](docs/stage1/failure_modes.csv).
+- **Com várias agulhas, o Lumi falha antes: em 32k.** No MK, todos os 21 erros de 32k são o número de **outra cidade**. O modelo ainda encontra as agulhas, mas perde a associação entre chave e valor. No MV, só 20 % dos prompts de 32k recuperam os quatro valores.
+- **Não há efeito de posição dentro da janela útil.** No L\* de cada modelo, a acurácia de S fica entre 0,95 e 1,00 em todas as 11 profundidades ([heatmaps](docs/stage1/heatmap_S_lumi.png)).
+- **A perda vem do pré-treino contínuo.** Com prompts idênticos token a token, o controle mantém L\* = 255k em S e MK. As diferenças pareadas são significativas desde 16k no MV (Δ = −0,05; p = 0,04), desde 32k no MK (Δ = −0,42; p ≈ 10⁻⁶) e desde 64k em S (Δ = −1,00; p ≈ 10⁻⁶⁶). O Lumi foi pré-treinado continuamente em janelas de 8k e generaliza até 4× isso antes de colapsar.
+
+### Recomendação para a Etapa 2
+
+| Critério | L\* | Desenho indicado |
+|---|---|---|
+| Regra da especificação (L\* de S) | 32k | Documento inteiro, até 32k |
+| **L\* efetivo (menor entre S, MK e MV)** | **16k** | **Chunks** |
+
+Recomendamos o critério efetivo, por três motivos:
+
+1. Um embedder precisa distinguir muitos fatos parecidos no mesmo documento, que é justamente o que o MK e o MV medem.
+2. Em 32k a acurácia com várias agulhas já é ~0,6.
+3. Não há margem: logo acima de 32k o modelo colapsa.
+
+O desenho seguro é **chunks de até 8k tokens**, onde as três tarefas ficam ≥ 0,98. Chunks de 16k são uma opção mais longa, com MV a 0,94. Para codificar documentos inteiros acima disso, a Etapa 4 precisa de um *fine-tuning* de contexto longo antes do treino contrastivo. O controle mostra que a arquitetura sustenta 255k, então a capacidade deve ser recuperável.
+
+### Desempenho (1× B200, lote de 1)
+
+O *prefill* fica em ~100k tokens/s de 8k a 32k e cai para ~58k tokens/s em 255k. Um prompt de 255k leva ~4,5 s, e os dois modelos têm o mesmo custo ([`perf.csv`](docs/stage1/perf.csv)). Já as medidas de *decode* (~340–600 tokens/s) devem ser lidas com cautela em contextos longos. Elas são obtidas subtraindo um *prefill* medido em outra chamada, e nos prompts longos o *prefill* domina o tempo, de modo que pequenas variações distorcem o resultado. Isso explica a tendência implausível de o *decode* "acelerar" com o comprimento.
+
+`docs/stage1/` traz os resultados agregados. As saídas brutas por prompt (`raw/results.jsonl`) e os logs ficam fora do repositório: a licença do Lumi ainda não está documentada (seção 13).
 
 ## 13. Licenças
 

@@ -1,0 +1,78 @@
+{
+  "lumi": [
+    {
+      "id": "G1",
+      "nome": "Template com thinking desligado",
+      "ok": true,
+      "detalhe": "prompt termina em 'art|>assistant\\n<think></think>'"
+    },
+    {
+      "id": "G2",
+      "nome": "C0 (sem palheiro) ≥ 95%",
+      "ok": true,
+      "detalhe": "acurácia estrita 1.000"
+    },
+    {
+      "id": "G3",
+      "nome": "Nenhum <think> no C0 nem em L ≤ 8k",
+      "ok": true,
+      "detalhe": "0 no escopo; 713 acima de 8k (modo de falha, seção 2)"
+    },
+    {
+      "id": "G4",
+      "nome": "Comprimento dentro de ±2% e ≤ L",
+      "ok": true,
+      "detalhe": "desvio máx. 0.0198; 0 acima do alvo"
+    },
+    {
+      "id": "G5",
+      "nome": "Número da agulha ausente do palheiro",
+      "ok": true,
+      "detalhe": "verificado na construção; 0 número(s) re-sorteado(s)"
+    },
+    {
+      "id": "G6",
+      "nome": "Todas as gerações concluídas",
+      "ok": true,
+      "detalhe": "0 faltando de 2610"
+    }
+  ],
+  "nemotron": [
+    {
+      "id": "G1",
+      "nome": "Template com thinking desligado",
+      "ok": true,
+      "detalhe": "prompt termina em 'art|>assistant\\n<think></think>'"
+    },
+    {
+      "id": "G2",
+      "nome": "C0 (sem palheiro) ≥ 95%",
+      "ok": true,
+      "detalhe": "acurácia estrita 1.000"
+    },
+    {
+      "id": "G3",
+      "nome": "Nenhum <think> no C0 nem em L ≤ 8k",
+      "ok": true,
+      "detalhe": "0 no escopo; 0 acima de 8k (modo de falha, seção 2)"
+    },
+    {
+      "id": "G4",
+      "nome": "Comprimento dentro de ±2% e ≤ L",
+      "ok": true,
+      "detalhe": "desvio máx. 0.0198; 0 acima do alvo"
+    },
+    {
+      "id": "G5",
+      "nome": "Número da agulha ausente do palheiro",
+      "ok": true,
+      "detalhe": "verificado na construção; 0 número(s) re-sorteado(s)"
+    },
+    {
+      "id": "G6",
+      "nome": "Todas as gerações concluídas",
+      "ok": true,
+      "detalhe": "0 faltando de 2610"
+    }
+  ]
+}

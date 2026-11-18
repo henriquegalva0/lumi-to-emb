@@ -323,28 +323,49 @@ def fmt_L(L) -> str:
     return f"{plots.fmt_len(L)} ({_int(L)})"
 
 
+def _decision(L: int | None) -> tuple[str, str]:
+    """Regra de decisão da Etapa 2 (tabela da seção 1 do README)."""
+    if L is not None and L >= 32768:
+        return "Documento inteiro", f"codificar documentos inteiros até {fmt_L(L)}, com currículo de comprimento até lá"
+    if L is not None and L >= 8192:
+        return "Chunks de 4k a 8k tokens", "usar *chunking* com janelas de 4k–8k e treinar o embedder nesse regime"
+    return "Reavaliar", "nem *chunks* de 8k estão garantidos; rever o desenho (outra base, fine-tuning de contexto ou chunks menores)"
+
+
 def recommendation(lstars: dict, cfg: dict) -> list[str]:
     roles = {m["role"]: m["key"] for m in cfg["models"]}
     a, b = roles.get("alvo"), roles.get("controle")
+    lengths = list(cfg["experiment"]["lengths"])
     lines: list[str] = []
     if not a or a not in lstars:
         return ["Sem resultados do modelo-alvo."]
-    L = lstars[a].get("L_S")
-    if L is not None and L >= 32768:
+    la_ = lstars[a]
+    L = la_.get("L_S")
+    name, what = _decision(L)
+    lines.append(f"**Pela regra da especificação (L\\* de S = {fmt_L(L)}): {name}.** Isto é, {what}.")
+
+    # L* efetivo: o menor entre as tarefas (um embedder precisa separar muitos fatos parecidos)
+    per_task = {t: la_.get(f"L_{t}") for t in ("S", "MK", "MV") if f"L_{t}" in la_}
+    L_eff = min(per_task.values(), key=lambda x: -1 if x is None else x) if per_task else L
+    if per_task and (L_eff or 0) < (L or 0):
+        worst = [t for t, v in per_task.items() if v == L_eff]
+        accs = ", ".join(f"{t} {la_.get(f'acc_{t}', {}).get(L, float('nan')):.2f}" for t in ("MK", "MV") if t in per_task)
+        name_eff, what_eff = _decision(L_eff)
         lines.append(
-            f"**Documento inteiro.** L\\* do Lumi = {fmt_L(L)} ≥ 32k: o embedder pode codificar documentos "
-            f"inteiros até L\\*; o currículo de comprimento da Etapa 4 deve ir até {fmt_L(L)}."
+            f"**Ressalva — várias agulhas: L\\* efetivo = {fmt_L(L_eff)} ({'/'.join(worst)}) → {name_eff}.** "
+            f"Em {fmt_L(L)} a acurácia já cai ({accs}). Um embedder precisa distinguir muitos fatos parecidos "
+            f"no mesmo documento, então o critério mais seguro é o menor L\\* entre as tarefas: {what_eff}."
         )
-    elif L is not None and L >= 8192:
-        lines.append(
-            f"**Chunks de 4k a 8k tokens.** L\\* do Lumi = {fmt_L(L)} (≈ 8k): usar *chunking* com janelas "
-            f"de 4k–8k e treinar o embedder nesse regime."
-        )
-    else:
-        lines.append(
-            f"**Reavaliar.** L\\* do Lumi = {fmt_L(L)} < 8k: nem o regime de *chunks* de 8k está garantido. "
-            "Rever o desenho (outra base, fine-tuning de contexto antes do embedder ou chunks menores)."
-        )
+    # margem: o que acontece no comprimento seguinte ao L*
+    if L is not None and L in lengths and lengths.index(L) + 1 < len(lengths):
+        nxt = lengths[lengths.index(L) + 1]
+        acc_next = la_.get("acc_S", {}).get(nxt)
+        if acc_next is not None and acc_next < 0.10:
+            lines.append(
+                f"**Sem margem acima de L\\*.** Em {plots.fmt_len(nxt)} a acurácia de S cai para {acc_next:.2f}: "
+                "é um colapso (saídas degeneradas, ver 'Modos de falha'), não uma degradação gradual. "
+                "Documentos pouco acima de L\\* falham por completo."
+            )
     if b and b in lstars:
         Lb = lstars[b].get("L_S")
         la, lb = (L or 0), (Lb or 0)
@@ -352,6 +373,13 @@ def recommendation(lstars: dict, cfg: dict) -> list[str]:
             lines.append(
                 f"**A perda vem do pré-treino contínuo curto.** O controle mantém L\\* = {fmt_L(Lb)}, "
                 f"e o Lumi cai logo depois de 8k–16k. A Etapa 4 deve incluir um fine-tuning de contexto longo "
+                "antes do treino contrastivo."
+            )
+        elif lb >= 4 * max(la, 1):
+            lines.append(
+                f"**Perda grande, atribuível ao pré-treino contínuo.** Controle: L\\* = {fmt_L(Lb)}; Lumi: {fmt_L(L)} "
+                f"(~{round(lb / max(la, 1))}× menor), com os mesmos prompts. Como a base mantém o contexto longo, ele deve ser "
+                "recuperável: para documentos acima de L\\*, a Etapa 4 precisa de um fine-tuning de contexto longo "
                 "antes do treino contrastivo."
             )
         elif lb > la:
@@ -576,11 +604,24 @@ def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataF
         L.append(f"- Prompts ({k}): {st.get('n_prompts')} | desvio máx. de comprimento {st.get('max_abs_len_dev', 0):.4f} | "
                  f"{st.get('n_resampled', 0)} com início re-sorteado | C0 com ~{st.get('c0_tokens_mean', 0):.0f} tokens.")
     if not depth_tab.empty:
-        L.append("\n**Acurácia de S por profundidade** (média sobre todos os comprimentos):\n")
-        dt = depth_tab.groupby(["model", "depth"])["acc_strict"].mean().unstack("model")
-        hdr = ["Profundidade"] + [next(m["label"] for m in models if m["key"] == c) for c in dt.columns]
-        rows = [[f"{round(d * 100)}%"] + [_pct(v) for v in dt.loc[d].tolist()] for d in dt.index]
-        L.append(_md_table(hdr, rows) + "\n")
+        # no L* de cada modelo: é na borda da capacidade que um efeito de posição apareceria
+        cols = []
+        for m in models:
+            Lm = lstars.get(m["key"], {}).get("L_S")
+            if Lm is not None:
+                cols.append((m, Lm))
+        if cols:
+            L.append("\n**Acurácia de S por profundidade no L\\* de cada modelo:**\n")
+            depths = sorted(depth_tab["depth"].unique())
+            hdr = ["Profundidade"] + [f"{m['label']} @ {plots.fmt_len(Lm)}" for m, Lm in cols]
+            rows = []
+            for d in depths:
+                row = [f"{round(d * 100)}%"]
+                for m, Lm in cols:
+                    c = depth_tab[(depth_tab["model"] == m["key"]) & (depth_tab["length"] == Lm) & (depth_tab["depth"] == d)]
+                    row.append(_pct(float(c["acc_strict"].iloc[0])) if len(c) else "–")
+                rows.append(row)
+            L.append(_md_table(hdr, rows) + "\n")
     if deviations:
         L.append(f"- {len(deviations)} desvio(s) da especificação registrado(s) em `DESVIOS.md`.")
     L.append("\nArquivos: `summary.csv`, `by_depth_S.csv`, `paired_tests.csv`, `failure_modes.csv`, `perf.csv`, `lstar.json`, "
@@ -676,7 +717,7 @@ def analyze_run(run_id: str) -> None:
     out_scope = ok_rows[(ok_rows["task"] != "C0") & (ok_rows["length"] > think_max)]
     n_out = int(out_scope["think_leak"].astype(bool).sum())
     if n_out:
-        lens = sorted({plots.fmt_len(int(x)) for x in out_scope.loc[out_scope["think_leak"].astype(bool), "length"]})
+        lens = [plots.fmt_len(x) for x in sorted({int(x) for x in out_scope.loc[out_scope["think_leak"].astype(bool), "length"]})]
         dev.add(
             "think-gate-scope",
             f"Gate G3 restrito ao C0 e a L ≤ {plots.fmt_len(think_max)}; {n_out} saída(s) com <think> acima disso "

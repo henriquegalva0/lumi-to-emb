@@ -1,0 +1,129 @@
+experiment:
+  name: stage1-context-window
+  seed: 20261117
+  lengths:
+  - 2048
+  - 4096
+  - 8192
+  - 16384
+  - 32768
+  - 65536
+  - 131072
+  - 261120
+  length_tolerance: 0.02
+  min_needle_gap: 0.02
+  threshold: 0.9
+  c0_gate: 0.95
+  think_gate_max_length: 8192
+  tasks:
+    C0:
+      reps: 50
+    S:
+      depths:
+      - 0.0
+      - 0.1
+      - 0.2
+      - 0.3
+      - 0.4
+      - 0.5
+      - 0.6
+      - 0.7
+      - 0.8
+      - 0.9
+      - 1.0
+      reps: 20
+    MK:
+      depths:
+      - 0.0
+      - 0.25
+      - 0.5
+      - 0.75
+      - 1.0
+      reps: 10
+      n_distractors: 3
+    MV:
+      depths:
+      - 0.0
+      - 0.25
+      - 0.5
+      - 0.75
+      - 1.0
+      reps: 10
+      n_values: 4
+  bootstrap:
+    n_resamples: 2000
+    seed: 7
+models:
+- key: lumi
+  label: Lumi-4B
+  role: alvo
+  hf_id: ceia-research/lumi-4b
+  revision: 27b30f40b930fd05cee5e1c1f8790f70fa5b816d
+- key: nemotron
+  label: Nemotron-3-Nano-4B (controle)
+  role: controle
+  hf_id: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16
+  revision: dfaf35de3e30f1867dd8dbc38a7fc9fb52d3914f
+haystack:
+  file: data/haystack_pt.parquet
+  target_tokens: 4000000
+  min_article_chars: 2000
+  min_clean_chars: 1000
+  min_line_chars: 80
+  sources:
+  - repo: wikimedia/wikipedia
+    revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+    files: 20231101.pt/*.parquet
+    text_field: text
+    id_field: id
+    title_field: title
+  - repo: HuggingFaceFW/fineweb-2
+    revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+    files: data/por_Latn/train/000_00000.parquet
+    text_field: text
+    id_field: id
+    title_field: null
+generation:
+  enable_thinking: false
+  temperature: 0.0
+  max_tokens: 64
+  max_tokens_mv: 128
+  seed: 1234
+vllm:
+  image: vllm/vllm-openai:v0.29.0
+  gpus: auto
+  engine:
+    dtype: bfloat16
+    max_model_len: 262144
+    gpu_memory_utilization: 0.9
+    mamba_ssm_cache_dtype: float32
+    enable_prefix_caching: false
+    max_num_seqs: 64
+    max_num_batched_tokens: 32768
+    trust_remote_code: true
+  fallback_engine:
+    dtype: bfloat16
+    max_model_len: 262144
+    gpu_memory_utilization: 0.9
+    mamba_ssm_cache_dtype: float32
+    trust_remote_code: true
+  chunk_tokens: 6000000
+  chunk_max_prompts: 256
+  worker_retries: 1
+perf:
+  enabled: true
+  reps: 3
+  decode_tokens: 128
+build:
+  workers: auto
+_meta:
+  config_file: stage1.yaml
+_runtime:
+  run_id: 20261118-115243_full
+  mode: full
+  backend: vllm
+  workdir: /workspace/lumi-inference/lumi-to-emb
+  git:
+    commit: 86c5a54af9138541b8322d32e176919c4518a174
+    branch: main
+  image_tag_env: vllm/vllm-openai:v0.29.0

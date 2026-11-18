@@ -1,0 +1,13 @@
+<|im_start|>system
+<|im_end|>
+<|im_start|>user
+Abaixo há um texto longo. Em algum ponto dele há informações sobre números mágicos.
+Leia o texto e responda à pergunta no final.
+
+<texto>
+O número mágico de Recife é 1234567.
+</texto>
+
+Pergunta: Qual é o número mágico de Recife? Responda apenas com o número.<|im_end|>
+<|im_start|>assistant
+<think></think>

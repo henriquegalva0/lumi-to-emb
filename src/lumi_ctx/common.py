@@ -121,6 +121,7 @@ def setup_logging(log_file: Path | None = None, level: int = logging.INFO) -> No
     root.setLevel(level)
     for handler in list(root.handlers):
         root.removeHandler(handler)
+        handler.close()
     stream = logging.StreamHandler(sys.stdout)
     stream.setFormatter(fmt)
     root.addHandler(stream)

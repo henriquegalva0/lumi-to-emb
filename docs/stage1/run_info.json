@@ -1,0 +1,210 @@
+{
+  "run_id": "20261118-115243_full",
+  "mode": "full",
+  "backend": "vllm",
+  "config_file": "stage1.yaml",
+  "started_at": "2026-11-18T11:52:43",
+  "resumed": false,
+  "gpus": [
+    "0"
+  ],
+  "template_checks": {
+    "lumi": {
+      "ok": true,
+      "thinking_closed_in_prompt": true,
+      "differs_from_thinking_on": true,
+      "generation_suffix_off": "|>user\nTeste<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "generation_suffix_on": "m_start|>user\nTeste<|im_end|>\n<|im_start|>assistant\n<think>\n",
+      "template_sha256": "ab7813c3abdd9cb6",
+      "example": "<|im_start|>system\n<|im_end|>\n<|im_start|>user\nAbaixo há um texto longo. Em algum ponto dele há informações sobre números mágicos.\nLeia o texto e responda à pergunta no final.\n\n<texto>\nO número mágico de Recife é 1234567.\n</texto>\n\nPergunta: Qual é o número mágico de Recife? Responda apenas com o número.<|im_end|>\n<|im_start|>assistant\n<think></think>"
+    },
+    "nemotron": {
+      "ok": true,
+      "thinking_closed_in_prompt": true,
+      "differs_from_thinking_on": true,
+      "generation_suffix_off": "|>user\nTeste<|im_end|>\n<|im_start|>assistant\n<think></think>",
+      "generation_suffix_on": "m_start|>user\nTeste<|im_end|>\n<|im_start|>assistant\n<think>\n",
+      "template_sha256": "ab7813c3abdd9cb6",
+      "example": "<|im_start|>system\n<|im_end|>\n<|im_start|>user\nAbaixo há um texto longo. Em algum ponto dele há informações sobre números mágicos.\nLeia o texto e responda à pergunta no final.\n\n<texto>\nO número mágico de Recife é 1234567.\n</texto>\n\nPergunta: Qual é o número mágico de Recife? Responda apenas com o número.<|im_end|>\n<|im_start|>assistant\n<think></think>"
+    }
+  },
+  "model_memory": {
+    "lumi": {
+      "layers": 42,
+      "attention_layers": 4,
+      "mamba_layers": 21,
+      "mlp_layers": 17,
+      "kv_heads": 8,
+      "head_dim": 128,
+      "kv_bytes_per_token": 16384,
+      "kv_gib_at_max_pos": 4.0,
+      "mamba_state_mb_per_seq": 82.6,
+      "max_position_embeddings": 262144,
+      "has_rope_keys": false,
+      "time_step_limit": [
+        0.0,
+        Infinity
+      ]
+    },
+    "nemotron": {
+      "layers": 42,
+      "attention_layers": 4,
+      "mamba_layers": 21,
+      "mlp_layers": 17,
+      "kv_heads": 8,
+      "head_dim": 128,
+      "kv_bytes_per_token": 16384,
+      "kv_gib_at_max_pos": 4.0,
+      "mamba_state_mb_per_seq": 82.6,
+      "max_position_embeddings": 262144,
+      "has_rope_keys": false,
+      "time_step_limit": null
+    }
+  },
+  "pool": {
+    "format_version": 1,
+    "source": {
+      "repo": "wikimedia/wikipedia",
+      "revision": "b04c8d1ceb2f5cd4588862100d08de323dccfbaa",
+      "files": "20231101.pt/*.parquet"
+    },
+    "source_index": 0,
+    "fallback_used": false,
+    "errors": [],
+    "seed": 20261117,
+    "params": {
+      "target_tokens": 4000000,
+      "min_article_chars": 2000,
+      "min_clean_chars": 1000,
+      "min_line_chars": 80
+    },
+    "count_tokenizer": "/cache/huggingface/hub/models--ceia-research--lumi-4b/snapshots/27b30f40b930fd05cee5e1c1f8790f70fa5b816d",
+    "n_docs": 2560,
+    "n_tokens": 4204000,
+    "n_sentences": 110045,
+    "n_chars": 16191601,
+    "filter_stats": {
+      "seen": 8149,
+      "too_short": 5471,
+      "magic": 0,
+      "short_after_clean": 118
+    },
+    "build_seconds": 25.1,
+    "created_at": "2026-11-18T04:11:34"
+  },
+  "prompt_sets": {
+    "lumi": {
+      "prompt_key": "410ffb240cd2edc0",
+      "prompt_dir": "work/prompts/410ffb240cd2edc0",
+      "stop_ids": [
+        2,
+        11
+      ],
+      "think_ids": [
+        12,
+        13
+      ],
+      "stats": {
+        "n_prompts": 2610,
+        "max_abs_len_dev": 0.01978,
+        "mean_len_dev": -0.0029105234375,
+        "n_over_target": 0,
+        "n_outside_tol": 0,
+        "outside_tol_uids": [],
+        "n_resampled": 77,
+        "n_value_redraws": 0,
+        "n_gap_relaxed": 0,
+        "c0_tokens_mean": 94.72,
+        "key": "410ffb240cd2edc0",
+        "seconds": 129.3,
+        "total_tokens": 166630555
+      }
+    },
+    "nemotron": {
+      "prompt_key": "410ffb240cd2edc0",
+      "prompt_dir": "work/prompts/410ffb240cd2edc0",
+      "stop_ids": [
+        2,
+        11
+      ],
+      "think_ids": [
+        12,
+        13
+      ],
+      "stats": {
+        "n_prompts": 2610,
+        "max_abs_len_dev": 0.01978,
+        "mean_len_dev": -0.0029105234375,
+        "n_over_target": 0,
+        "n_outside_tol": 0,
+        "outside_tol_uids": [],
+        "n_resampled": 77,
+        "n_value_redraws": 0,
+        "n_gap_relaxed": 0,
+        "c0_tokens_mean": 94.72,
+        "key": "410ffb240cd2edc0",
+        "seconds": 129.3,
+        "total_tokens": 166630555
+      }
+    }
+  },
+  "paired_identical": true,
+  "engine_info": {
+    "lumi": [
+      {
+        "backend": "vllm",
+        "vllm_version": "0.29.0",
+        "args": {
+          "model": "ceia-research/lumi-4b",
+          "revision": "27b30f40b930fd05cee5e1c1f8790f70fa5b816d",
+          "tokenizer": "ceia-research/lumi-4b",
+          "tokenizer_revision": "27b30f40b930fd05cee5e1c1f8790f70fa5b816d",
+          "seed": 1234,
+          "dtype": "bfloat16",
+          "max_model_len": 262144,
+          "gpu_memory_utilization": 0.9,
+          "mamba_ssm_cache_dtype": "float32",
+          "enable_prefix_caching": false,
+          "max_num_seqs": 64,
+          "max_num_batched_tokens": 32768,
+          "trust_remote_code": true
+        },
+        "load_seconds": 37.270472288131714
+      }
+    ],
+    "nemotron": [
+      {
+        "backend": "vllm",
+        "vllm_version": "0.29.0",
+        "args": {
+          "model": "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16",
+          "revision": "dfaf35de3e30f1867dd8dbc38a7fc9fb52d3914f",
+          "tokenizer": "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16",
+          "tokenizer_revision": "dfaf35de3e30f1867dd8dbc38a7fc9fb52d3914f",
+          "seed": 1234,
+          "dtype": "bfloat16",
+          "max_model_len": 262144,
+          "gpu_memory_utilization": 0.9,
+          "mamba_ssm_cache_dtype": "float32",
+          "enable_prefix_caching": false,
+          "max_num_seqs": 64,
+          "max_num_batched_tokens": 32768,
+          "trust_remote_code": true
+        },
+        "load_seconds": 35.03887629508972
+      }
+    ]
+  },
+  "timing": {
+    "ambiente": 4.1,
+    "tokenizers_e_template": 13.1,
+    "palheiro": 0.2,
+    "prompts": 130.1,
+    "download_modelos": 0.0,
+    "geracao_lumi": 2445.5,
+    "geracao_nemotron": 2460.5,
+    "pontuacao": 0.3
+  },
+  "finished_at": "2026-11-18T13:16:57",
+  "duration_s": 5053.9
+}
