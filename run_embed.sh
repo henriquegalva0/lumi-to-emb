@@ -51,7 +51,8 @@ die() { echo "[run_embed] ERRO: $*" >&2; exit 2; }
 usage() { sed -n '2,32p' "$REPO_DIR/run_embed.sh" | sed 's/^# \{0,1\}//'; }
 
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
-MTEB_BR="mteb-pt @ git+https://github.com/tardellirs/mteb-br@5f45dbc309cbbaf5c244be4b7122d6e332bbebfc"
+# MTEB-BR pelo arquivo do commit (a imagem do vLLM não traz o binário git, exigido por URLs git+https)
+MTEB_BR="mteb-pt @ https://github.com/tardellirs/mteb-br/archive/5f45dbc309cbbaf5c244be4b7122d6e332bbebfc.tar.gz"
 PY_SYS="$(command -v python3 || true)"
 
 # ------------------------------------------------------------------ trava entre jobs

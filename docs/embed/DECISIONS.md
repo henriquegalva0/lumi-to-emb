@@ -59,7 +59,7 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 
 | Decisão | Motivo |
 |---|---|
-| **MTEB-BR pelo pacote oficial** (`tardellirs/mteb-br`, commit `5f45dbc`), instalado sem dependências | Ele fixa `numpy<2` sem necessidade técnica para as tarefas; o resto do ambiente usa numpy 2 |
+| **MTEB-BR pelo pacote oficial** (`tardellirs/mteb-br`, commit `5f45dbc`), instalado sem dependências a partir do `.tar.gz` do commit | Ele fixa `numpy<2` sem necessidade técnica para as tarefas; o resto do ambiente usa numpy 2. O `.tar.gz` (mesmos arquivos da instalação via git) evita depender do binário `git`, ausente na imagem do vLLM |
 | **Mesmas instruções para todos os modelos com instrução**, por tipo de tarefa e em português (`configs/embed/eval.yaml`), registradas por tarefa | Seção 5.1 do plano. Os baselines com instrução (Qwen3-Embedding, e5-instruct) passam pelo `InstructSentenceTransformerModel` do mteb com essas instruções; os sem instrução usam a implementação oficial do mteb |
 | **IC e p-valores com a tarefa como unidade** | Mesmo método do MTEB-BR. "Vitória" só com p < 0,05 |
 | **NanoMTEB-BR substituído por uma suíte `smoke`** (2 tarefas do MTEB-BR + 2 do MTEB-PT) | O NanoMTEB-BR não está no mteb |
