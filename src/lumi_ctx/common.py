@@ -130,7 +130,8 @@ def setup_logging(log_file: Path | None = None, level: int = logging.INFO) -> No
         fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setFormatter(fmt)
         root.addHandler(fh)
-    for noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3", "filelock", "fsspec", "matplotlib"):
+    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2", "huggingface_hub", "hf_xet", "urllib3", "filelock",
+                  "fsspec", "matplotlib"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
