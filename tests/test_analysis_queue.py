@@ -146,3 +146,35 @@ def test_perf_table_discards_incomplete_decode():
     t = perf_table(rows, {}, cfg)
     assert math.isnan(t.loc[t.length == 2048, "decode_tok_s"].iloc[0])
     assert t.loc[t.length == 4096, "decode_tok_s"].iloc[0] == 400.0
+
+
+def test_gpu_description_tolerates_unavailable_fields():
+    # nvidia-smi devolve "[N/A]" na memória de GPUs particionadas (MIG): o relatório não pode quebrar
+    from lumi_ctx.analysis import gpu_description
+
+    assert gpu_description([]) == "–"
+    assert gpu_description([{"name": "NVIDIA B200", "memory_mib": "183359"}]) == "1× NVIDIA B200 (179 GiB)"
+    assert gpu_description([{"name": "NVIDIA B200", "memory_mib": "[N/A]"}] * 2) == "2× NVIDIA B200"
+
+
+def test_pipeline_with_mig_like_gpu(tmp_path, monkeypatch, tiny_cfg, tiny_tok_dir):
+    # Regressão: o setup no servidor falhava na análise com memory_mib = "[N/A]"
+    import yaml
+
+    import lumi_ctx.envinfo as ei
+    import lumi_ctx.haystack as hs
+    import lumi_ctx.runner as rn
+    from conftest import ROOT, synthetic_articles
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path / "work"))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setenv("PYTHONPATH", str(ROOT / "src"))
+    cfg_path = tmp_path / "tiny.yaml"
+    cfg_path.write_text(yaml.safe_dump(tiny_cfg, allow_unicode=True))
+    monkeypatch.setattr(rn, "tokenizer_dir", lambda m: str(tiny_tok_dir))
+    monkeypatch.setattr(hs, "iter_articles", synthetic_articles)
+    monkeypatch.setattr(ei, "gpu_inventory",
+                        lambda: [{"index": "0", "name": "NVIDIA B200", "memory_mib": "[N/A]", "driver": "[N/A]"}])
+    assert rn.cmd_run("smoke", str(cfg_path), "t_mig", "fake", 2) == 0
+    report = (tmp_path / "work" / "results" / "t_mig" / "REPORT.md").read_text()
+    assert "1× NVIDIA B200" in report

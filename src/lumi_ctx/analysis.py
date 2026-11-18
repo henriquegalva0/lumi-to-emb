@@ -439,6 +439,16 @@ def _md_table(headers: list[str], rows: list[list]) -> str:
     return "\n".join(out)
 
 
+def gpu_description(gpus: list[dict]) -> str:
+    """'N× nome (X GiB)'. O nvidia-smi devolve '[N/A]' em alguns campos (por exemplo, GPUs
+    particionadas com MIG); nesse caso a memória é omitida."""
+    if not gpus:
+        return "–"
+    mib = str(gpus[0].get("memory_mib", "")).strip()
+    mem = f" ({int(mib) // 1024} GiB)" if mib.isdigit() else ""
+    return f"{len(gpus)}× {gpus[0].get('name', '?')}{mem}"
+
+
 def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataFrame, lstars: dict,
                  paired: pd.DataFrame, gates: dict, perf: pd.DataFrame, estimate: pd.DataFrame | None,
                  depth_tab: pd.DataFrame, deviations: list[dict], failures: pd.DataFrame | None = None) -> None:
@@ -537,7 +547,7 @@ def write_report(rdir: Path, cfg: dict, info: dict, env: dict, summary: pd.DataF
     L.append(_md_table(["Modelo", "Gate", "Critério", "", "Detalhe"], rows) + "\n")
     pk = env.get("packages", {})
     gpus = env.get("gpus", [])
-    gpu_desc = f"{len(gpus)}× {gpus[0]['name']} ({int(gpus[0]['memory_mib']) // 1024} GiB)" if gpus else "–"
+    gpu_desc = gpu_description(gpus)
     engines = info.get("engine_info", {})
     eng_args = next((e[0].get("args") for e in engines.values() if e), None)
     dur = info.get("duration_s")
