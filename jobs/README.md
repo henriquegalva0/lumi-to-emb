@@ -109,7 +109,7 @@ chama `sauron submit`. Os perfis:
 | Perfil | `vram` | Classe | Etapas |
 |---|---|---|---|
 | GPU | 160 | B200 (~179 GB da cota) | `check`, `synth`, `mine`, `train`, `merge`, `eval`, `baseline`, `verify`, `export-base` |
-| CPU | 20 | a menor classe (~89 GB da cota) | `setup`, `selftest`, `sources`, `decontam`, `mix`, `report`, `publish`, `card` |
+| CPU | 20 | a menor classe (~89 GB da cota) | `setup`, `selftest`, `sources`, `decontam`, `mix`, `report`, `publish`, `card`, `diagnose` |
 
 Com 268 GB de cota, **um job de cada perfil cabe ao mesmo tempo**. Dois jobs de GPU ao
 mesmo tempo, não: o segundo fica na fila até o primeiro terminar.

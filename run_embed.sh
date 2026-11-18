@@ -54,12 +54,25 @@ TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 MTEB_BR="mteb-pt @ git+https://github.com/tardellirs/mteb-br@5f45dbc309cbbaf5c244be4b7122d6e332bbebfc"
 PY_SYS="$(command -v python3 || true)"
 
+# ------------------------------------------------------------------ trava entre jobs
+# Dois jobs podem rodar ao mesmo tempo (um de GPU e um de CPU). A trava impede que ambos
+# criem o mesmo ambiente simultaneamente: o segundo espera o primeiro terminar a instalação.
+env_lock() {
+  command -v flock >/dev/null || { say "flock indisponível; sem trava entre jobs"; return 0; }
+  mkdir -p "$LUMI_WORKDIR/logs"
+  exec 9>"$LUMI_WORKDIR/logs/.envs.lock"
+  flock -n 9 || { say "outro job está criando os ambientes; aguardando..."; flock 9; }
+}
+env_unlock() { if command -v flock >/dev/null; then flock -u 9 || true; exec 9>&-; fi; }
+
 # ------------------------------------------------------------------ ambiente do vLLM
 vllm_env() {
   # reaproveita o setup da Etapa 1 (python do sistema + extras com restrições)
   [ -n "$PY_SYS" ] || return 1
   "$PY_SYS" -c "import vllm" 2>/dev/null || return 1
+  env_lock
   bash "$REPO_DIR/run_stage1.sh" setup >/dev/null
+  env_unlock
   if [ -x "$REPO_DIR/.venv/bin/python" ]; then PY="$REPO_DIR/.venv/bin/python"; else PY="$PY_SYS"; fi
 }
 
@@ -68,6 +81,9 @@ embed_env() {
   local venv="$REPO_DIR/.venv-embed"
   local stamp="$venv/.ok_$("$PY_SYS" -c 'import hashlib,sys; print(hashlib.sha256((open(sys.argv[1]).read()+sys.argv[2]).encode()).hexdigest()[:12])' requirements-embed.lock "$MTEB_BR")"
   if [ -x "$venv/bin/python" ] && [ -f "$stamp" ]; then PY="$venv/bin/python"; return; fi
+  env_lock
+  # outro job pode ter terminado a instalação enquanto esperávamos a trava
+  if [ -x "$venv/bin/python" ] && [ -f "$stamp" ]; then env_unlock; PY="$venv/bin/python"; return; fi
   command -v uv >/dev/null || "$PY_SYS" -m pip install --user uv
   say "Criando $venv a partir de requirements-embed.lock (torch 2.12.1+cu130)"
   rm -rf "$venv"
@@ -79,6 +95,7 @@ embed_env() {
   env -u UV_OVERRIDE uv pip install --python "$venv/bin/python" --no-deps "$MTEB_BR"
   "$venv/bin/python" -c "import torch, transformers, peft, mteb, mteb_pt, sentence_transformers; print('ok', torch.__version__, transformers.__version__)"
   touch "$stamp"
+  env_unlock
   PY="$venv/bin/python"
   "$PY" -m pip freeze > "$LUMI_WORKDIR/logs/pip_freeze_embed_${TS}.txt" 2>/dev/null || \
     env -u UV_OVERRIDE uv pip freeze --python "$PY" > "$LUMI_WORKDIR/logs/pip_freeze_embed_${TS}.txt" || true

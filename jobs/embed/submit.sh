@@ -10,6 +10,7 @@
 # `sauron submit`. Perfis: "gpu" = B200 (vram 160, ~179 GB da cota); "cpu" = a menor classe
 # de GPU (vram 20), para etapas sem GPU — as duas cabem juntas numa cota de 268 GB.
 set -euo pipefail
+trap 'echo "ERRO: submit.sh falhou na linha $LINENO (comando: $BASH_COMMAND)" >&2' ERR
 [ $# -ge 1 ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 STEP="$1"; shift
 CLONE="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -19,20 +20,26 @@ REL="${CLONE#$WS_ROOT/}"          # ex.: lumi-inference/lumi-to-emb
 WORKSPACE="${REL%%/*}"            # ex.: lumi-inference  (pasta em que o job começa)
 SUBDIR="${REL#$WORKSPACE}"; SUBDIR="${SUBDIR#/}"   # ex.: lumi-to-emb (vazio se o clone for a própria pasta)
 
-profile=gpu; hours=8; mem=96g; cpus=8
+# O guia do Sauron trata > 4 CPUs e > 32 GB de RAM como "limite de atenção" (o job é aceito,
+# com aviso). Só passam disso as etapas que carregam o modelo de 4B (ou um gerador/teacher)
+# e as que montam índices grandes em memória.
+profile=gpu; hours=8; mem=64g; cpus=4
 case "$STEP" in
-  setup|selftest)          profile=cpu; hours=2 ;;
+  setup|selftest)          profile=cpu; hours=2; mem=16g ;;
+  diagnose)                profile=cpu; hours=1; mem=8g; cpus=2 ;;
   sources)                 profile=cpu; hours=8; mem=64g ;;
-  decontam)                profile=cpu; hours=8; mem=96g ;;
-  mix|report)              profile=cpu; hours=2; mem=64g ;;
+  decontam)                profile=cpu; hours=8; mem=64g ;;
+  mix|report)              profile=cpu; hours=2; mem=32g ;;
   publish|card)            profile=cpu; hours=3; mem=16g; cpus=2 ;;
   check|export-base|verify) hours=2 ;;
   synth|mine)              hours=12 ;;
   train|eval|baseline)     hours=12 ;;
-  merge)                   hours=6 ;;
+  merge)                   hours=6; mem=32g ;;
 esac
 vram=160; [ "$profile" = cpu ] && vram=20
-NAME="lumi-emb-${STEP}$( [ $# -gt 0 ] && printf -- '-%s' "$@" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40 )"
+SUFFIX=""
+if [ $# -gt 0 ]; then SUFFIX="$(printf -- '-%s' "$@" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40)"; fi
+NAME="lumi-emb-${STEP}${SUFFIX}"
 NAME="$(echo "$NAME" | sed 's/--*/-/g; s/-$//')"
 GEN="$CLONE/jobs/embed/.generated"
 mkdir -p "$GEN"
