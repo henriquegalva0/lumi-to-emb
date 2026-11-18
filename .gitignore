@@ -8,6 +8,9 @@
 
 # Ambientes e caches locais
 /.venv/
+/.venv-embed/
+/.uv-cache/
+/checkpoints/
 /.pydeps/
 __pycache__/
 *.py[cod]
@@ -23,3 +26,4 @@ __pycache__/
 
 # Sistema
 .DS_Store
+/jobs/embed/.generated/

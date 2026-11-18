@@ -1,0 +1,5 @@
+# Varredura de LR em 1/16 do S1 (seção 3.4): escolher pelo dev e copiar para C1.yaml.
+inherit: _s1.yaml
+init: hf:ceia-research/lumi-4b@27b30f40b930fd05cee5e1c1f8790f70fa5b816d
+data: {limit: 25000}
+train: {lr: 4.0e-4, eval_every: 6}

@@ -1,0 +1,3 @@
+# Trilho B (f): S0/MNTP.
+inherit: _s0.yaml
+embedding: {direction: Bf}

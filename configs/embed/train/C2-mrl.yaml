@@ -1,0 +1,3 @@
+# A12: Matryoshka (MRL).
+inherit: C2.yaml
+loss: {mrl_dims: [64, 128, 256, 512, 1024, 2048]}

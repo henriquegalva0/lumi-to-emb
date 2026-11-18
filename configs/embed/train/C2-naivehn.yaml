@@ -1,0 +1,3 @@
+# A3: top-k ingênuo (sem o filtro positive-aware).
+inherit: C2.yaml
+data: {train: sets/S2-naivehn/train.jsonl}

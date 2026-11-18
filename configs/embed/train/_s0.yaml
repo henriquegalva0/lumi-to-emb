@@ -1,0 +1,14 @@
+# Estágio S0 — MNTP (só trilho B; LLM2Vec): ~80 % texto PT + ~20 % multidomínio, LoRA r = 16,
+# α = 32, ~1000 passos, batch 32. Curto de propósito: MNTP longo causa esquecimento.
+inherit: ../base.yaml
+init: hf:ceia-research/lumi-4b@27b30f40b930fd05cee5e1c1f8790f70fa5b816d
+data: {train: sets/s0/train.jsonl}
+embedding: {pooling: mean}
+mntp: {mask_ratio: 0.3, mask_token: "<unk>"}   # 20–40 % no plano; ajustar no dev
+train:
+  stage: s0
+  lora: {r: 16, alpha: 32}
+  lr: 5.0e-5
+  batch_size: 32
+  max_steps: 1000
+  warmup_steps: 50

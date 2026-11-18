@@ -1,0 +1,3 @@
+# A1: S2 direto, sem o S1.
+inherit: C2.yaml
+init: hf:ceia-research/lumi-4b@27b30f40b930fd05cee5e1c1f8790f70fa5b816d

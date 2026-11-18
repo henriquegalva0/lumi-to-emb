@@ -1,0 +1,3 @@
+# A4: negativos do batch + máscara de falso negativo (Qwen3-Embedding).
+inherit: C2.yaml
+loss: {mode: inbatch, fn_margin: 0.1}

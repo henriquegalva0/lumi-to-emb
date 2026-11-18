@@ -90,3 +90,43 @@ venv e instala `requirements-dev.txt`.
 pode ser apagado depois que a execução terminar. `data/haystack_pt.parquet` é
 reaproveitado entre execuções. Os pesos dos modelos ficam no cache compartilhado
 do cluster (`HF_HOME`), fora da pasta do projeto.
+
+---
+
+# Lumi-Embed (Etapas 2–5) no Sauron
+
+Cada etapa do [`run_embed.sh`](../run_embed.sh) vira um job com
+[`embed/submit.sh`](embed/submit.sh). Rode **na sessão de login, dentro do clone**:
+
+```bash
+cd ~/workspace/lumi-inference/lumi-to-emb && git pull
+bash jobs/embed/submit.sh <comando> [argumentos]
+```
+
+O script grava o YAML e o `.sh` do job em `jobs/embed/.generated/` (fora do Git) e
+chama `sauron submit`. Os perfis:
+
+| Perfil | `vram` | Classe | Etapas |
+|---|---|---|---|
+| GPU | 160 | B200 (~179 GB da cota) | `check`, `synth`, `mine`, `train`, `merge`, `eval`, `baseline`, `verify`, `export-base` |
+| CPU | 20 | a menor classe (~89 GB da cota) | `setup`, `selftest`, `sources`, `decontam`, `mix`, `report`, `publish`, `card` |
+
+Com 268 GB de cota, **um job de cada perfil cabe ao mesmo tempo**. Dois jobs de GPU ao
+mesmo tempo, não: o segundo fica na fila até o primeiro terminar.
+
+**Uma regra:** não rode dois jobs que escrevam a mesma coisa ao mesmo tempo. Na prática:
+
+- `setup` sozinho;
+- `synth` e `mine` nunca juntos;
+- só um `train` do mesmo checkpoint por vez.
+
+Jobs de etapas diferentes, como `decontam` (CPU) com um `synth` (GPU), podem rodar juntos.
+
+**Segredos:** o `publish` e o `card` usam o `HF_TOKEN` do arquivo `.env` do clone. O token
+nunca vai no YAML nem na linha de comando.
+
+**Retomada:** `train`, `synth` e `eval` continuam de onde pararam. Basta reenviar o
+mesmo comando depois de um `max_time` estourado ou de um `sauron cancel`.
+
+A ordem completa e o que conferir entre as etapas estão em
+[docs/embed/PIPELINE.md](../docs/embed/PIPELINE.md).

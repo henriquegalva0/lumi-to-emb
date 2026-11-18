@@ -1,0 +1,6 @@
+# Merge do trilho bidirecional (só Ba com Ba).
+name: M-B
+candidates: [B2a, B2a-s2]
+anchor: B0a
+base_lambdas: [0.25, 0.5, 0.75]
+dev: sets/S2/dev.jsonl

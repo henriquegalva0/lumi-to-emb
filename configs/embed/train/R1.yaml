@@ -1,0 +1,8 @@
+# R1 — receita do Mamba Retriever aplicada ao lumi-4b: 1 estágio, InfoNCE τ = 0,01,
+# mMARCO-PT com 63 negativos BM25 (os oficiais do MS MARCO). LoRA em vez do ajuste completo
+# do artigo (modelo de 4B; proposta).
+inherit: _s2.yaml
+init: hf:ceia-research/lumi-4b@27b30f40b930fd05cee5e1c1f8790f70fa5b816d
+data: {train: sets/R1/train.jsonl, dev: sets/S2/dev.jsonl, negatives_per_example: 63}
+loss: {mode: hn, temperature: 0.01}
+train: {stage: r1, batch_size: 32, micro_batch: 2, lr: 1.0e-4}

@@ -1,0 +1,4 @@
+# A6: pooling EOS no trilho bidirecional.
+inherit: _s2.yaml
+init: ckpt:B1a
+embedding: {direction: Ba, pooling: eos}

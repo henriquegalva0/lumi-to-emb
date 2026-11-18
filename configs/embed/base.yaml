@@ -1,0 +1,25 @@
+# Lumi-Embed — parâmetros comuns a todas as etapas (Etapas 2–5 do projeto).
+# As decisões em aberto do plano ficam parametrizadas aqui, não no código:
+#   D1 checkpoint de partida   -> model.hf_id / model.revision (instruct; pré-SFT se existir)
+#   D2 licença                 -> pendente; ver docs/embed/DATA_CARD.md e o model card
+#   D3 LoRA × completo         -> train.method em cada configs/embed/train/<ID>.yaml (ablação A10)
+#   D4 pooling do trilho B     -> embedding.pooling nos configs B* (média por padrão; EOS como ablação A6)
+seed: 1234
+
+model:
+  hf_id: ceia-research/lumi-4b
+  revision: 27b30f40b930fd05cee5e1c1f8790f70fa5b816d
+  attn_implementation: sdpa
+  use_hub_kernels: true            # kernels Mamba-2 do Hub (kernels-community/mamba-ssm, torch 2.12 + cu130)
+
+embedding:
+  direction: C                     # C (causal) | Ba (atenção bidirecional) | Bf (atenção + BiMamba)
+  pooling: eos                     # eos (trilho C) | mean (trilho B)
+  eos_token: "</s>"                # anexado pelo pós-processador do tokenizer
+  pad_token: "<unk>"
+  normalize: true
+  max_length: 512                  # S1/S2; S-long usa 2k → 8k
+  instruction_template: "Instruct: {instruction}\nQuery: {query}"
+
+hub:
+  repo: henriquegalvao/lumi-4b-embedding

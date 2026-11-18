@@ -1,0 +1,191 @@
+"""Mineração de negativos difíceis com um teacher forte (seção 2.4 do plano). Ambiente do vLLM.
+
+Para cada família de tarefa (retrieval curto, retrieval longo, sts, bitext):
+1. o teacher (Qwen3-Embedding, runner de pooling do vLLM) embute queries (com instrução)
+   e documentos (positivos + negativos já existentes + corpus extra opcional);
+2. pos_score = cos(q, positivo); nos sintéticos, descarta se pos_score ≤ 0,7 ou se o
+   positivo não aparece no top-k do teacher (filtros do Qwen3-Embedding e proposta do plano);
+3. busca os candidatos mais próximos (produto interno na GPU), sem o próprio positivo nem
+   quase-duplicatas dele, e guarda:
+   - negatives:       TopK-PercPos — só candidatos com score < 0,95 × pos_score [10][11]
+   - naive_negatives: top-k sem filtro (condição da ablação A3)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import math
+import re
+
+from ..utils import EmbedError, data_dir, iter_jsonl, write_json
+from .schema import norm_text
+
+log = logging.getLogger("lumi_embed.mine")
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"\w+", norm_text(text).lower())
+
+
+def word_ngrams(text: str, n: int = 3) -> set[tuple[str, ...]]:
+    w = _words(text)
+    return {tuple(w[i : i + n]) for i in range(max(0, len(w) - n + 1))}
+
+
+def near_duplicate(a: str, b: str, threshold: float = 0.8) -> bool:
+    """Igual ou quase igual (Jaccard de 3-gramas de palavras, ignorando pontuação e caixa)."""
+    if _words(a) == _words(b):
+        return True
+    ga, gb = word_ngrams(a), word_ngrams(b)
+    if not ga or not gb:
+        return False
+    return len(ga & gb) / len(ga | gb) >= threshold
+
+
+def select_negatives(cands: list[tuple[str, float]], positive: str, pos_score: float, k: int, perc: float,
+                     ) -> tuple[list[dict], list[dict]]:
+    """(TopK-PercPos, top-k ingênuo) a partir de candidatos ordenados por score decrescente."""
+    clean = [(t, s) for t, s in cands if not near_duplicate(t, positive)]
+    percpos = [{"text": t, "score": round(s, 4)} for t, s in clean if s < perc * pos_score][:k]
+    naive = [{"text": t, "score": round(s, 4)} for t, s in clean][:k]
+    return percpos, naive
+
+
+def family(ex: dict) -> str:
+    if ex["task"] == "retrieval":
+        return "retrieval_long" if ex.get("source", {}).get("long") else "retrieval"
+    return ex["task"]
+
+
+class Teacher:
+    """Um único motor de pooling por processo (o vLLM não libera a GPU de forma confiável)."""
+
+    def __init__(self, mcfg: dict):
+        from vllm import LLM
+
+        self.cfg = mcfg
+        self.max_len = int(mcfg["max_len"])
+        self.llm = LLM(model=mcfg["model"], revision=mcfg.get("revision"), runner="pooling",
+                       max_model_len=int(mcfg["max_len_long"]),
+                       gpu_memory_utilization=float(mcfg.get("gpu_memory_utilization", 0.5)), seed=0)
+
+    def embed(self, texts: list[str]):
+        import torch
+
+        outs = self.llm.embed(texts, use_tqdm=False,
+                              tokenization_kwargs={"truncation": True, "max_length": self.max_len})
+        e = torch.tensor([o.outputs.embedding for o in outs], dtype=torch.float32)
+        return torch.nn.functional.normalize(e, dim=-1).half().cuda()
+
+    def query_text(self, ex: dict) -> str:
+        inst = ex.get("instruction") or self.cfg["default_instruction"]
+        return self.cfg["query_template"].format(instruction=inst, query=ex["query"])
+
+
+def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: dict) -> tuple[list[dict], dict]:
+    import torch
+
+    docs, index = [], {}
+
+    def add(t: str) -> int:
+        t = norm_text(t)
+        if t not in index:
+            index[t] = len(docs)
+            docs.append(t)
+        return index[t]
+
+    pos_idx = [add(r["positive"]) for r in rows]
+    for r in rows:
+        for n in r.get("negatives") or []:
+            add(n["text"])
+    for t in extra_docs:
+        add(t)
+    symmetric = rows[0]["task"] in ("sts", "bitext")
+    q_inputs = [teacher.query_text(r) for r in rows]
+    d_inputs = docs
+    if symmetric:  # nas tarefas simétricas o teacher também recebe a instrução nos documentos
+        inst = rows[0].get("instruction") or mcfg["default_instruction"]
+        d_inputs = [mcfg["query_template"].format(instruction=inst, query=d) for d in docs]
+    bs = int(mcfg.get("embed_chunk", 200_000))
+    Q = torch.cat([teacher.embed(q_inputs[i : i + bs]) for i in range(0, len(q_inputs), bs)])
+    D = torch.cat([teacher.embed(d_inputs[i : i + bs]) for i in range(0, len(d_inputs), bs)])
+    k_store, top = int(mcfg["store_negatives"]), int(mcfg["search_top"])
+    perc, thr, rank_k = float(mcfg["percpos"]), float(mcfg["synthetic_min_cos"]), int(mcfg["positive_rank_check"])
+    kept, stats = [], {"in": len(rows), "drop_low_cos": 0, "drop_rank": 0, "few_negatives": 0}
+    pidx = torch.tensor(pos_idx, device=Q.device)
+    for s in range(0, len(rows), 4096):
+        q = Q[s : s + 4096]
+        scores = (q @ D.T).float()
+        pos_scores = scores[torch.arange(len(q)), pidx[s : s + 4096]]
+        rank = (scores > pos_scores.unsqueeze(1)).sum(dim=1) + 1
+        vals, ids = scores.topk(min(top, scores.shape[1]), dim=1)
+        vals, ids, pos_scores, rank = vals.cpu(), ids.cpu(), pos_scores.cpu(), rank.cpu()
+        for j in range(len(q)):
+            r = rows[s + j]
+            ps = float(pos_scores[j])
+            synthetic = "gen" in (r.get("source") or {})
+            if synthetic and ps <= thr:
+                stats["drop_low_cos"] += 1
+                continue
+            if synthetic and int(rank[j]) > rank_k:
+                stats["drop_rank"] += 1
+                continue
+            cands = [(docs[int(i)], float(v)) for v, i in zip(vals[j], ids[j]) if int(i) != pos_idx[s + j]]
+            percpos, naive = select_negatives(cands, r["positive"], ps, k_store, perc)
+            prior = [n for n in (r.get("negatives") or []) if n.get("kind") in ("nli", "contraste")]
+            r = {**r, "pos_score": round(ps, 4), "negatives": prior + percpos, "naive_negatives": prior + naive,
+                 "teacher": {"model": mcfg["model"], "rank_pos": int(rank[j])}}
+            if len(r["negatives"]) < int(mcfg.get("min_negatives", 1)):
+                stats["few_negatives"] += 1
+            kept.append(r)
+    stats["out"] = len(kept)
+    stats["pos_score_mean"] = round(sum(r["pos_score"] for r in kept) / max(1, len(kept)), 4)
+    return kept, stats
+
+
+def run_mine(cfg: dict, inputs: list[str] | None = None) -> dict:
+    mcfg = cfg["mining"]
+    files = inputs or mcfg["inputs"]
+    groups: dict[str, list[dict]] = {}
+    for f in files:
+        path = data_dir(f)
+        if not path.exists():
+            log.warning("Entrada ausente (pulando): %s", path)
+            continue
+        for ex in iter_jsonl(path):
+            groups.setdefault(family(ex), []).append(ex)
+    if not groups:
+        raise EmbedError("Nada para minerar: rode as fontes, a síntese e a descontaminação antes.")
+    all_stats = {}
+    teacher = Teacher(mcfg)
+    for fam, rows in sorted(groups.items()):
+        teacher.max_len = int(mcfg["max_len_long"] if fam == "retrieval_long" else mcfg["max_len"])
+        log.info("Minerando %s: %d exemplos (max_len %d)", fam, len(rows), teacher.max_len)
+        kept, stats = mine_group(teacher, rows, [], mcfg)
+        _free_gpu()
+        out = data_dir("mined", f"{fam}.jsonl")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            for r in kept:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        all_stats[fam] = stats
+        log.info("  %s", stats)
+    write_json(data_dir("mined", "stats.json"), all_stats)
+    return all_stats
+
+
+def _free_gpu() -> None:
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def expected_pool_gb(n_docs: int, dim: int) -> float:
+    return n_docs * dim * 2 / 1e9 + math.ceil(n_docs / 1e6)

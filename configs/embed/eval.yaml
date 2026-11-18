@@ -1,0 +1,48 @@
+# Avaliação (seção 5.1 do plano). Mesmo protocolo para todos os modelos: instrução só na
+# query (documentos sem instrução), as mesmas instruções por tipo de tarefa e o mesmo
+# comprimento máximo.
+eval:
+  batch_size: 32
+  raise_error: false
+  suites:
+    smoke:                         # T6: 2 tarefas do MTEB-BR + 2 do MTEB-PT
+      mteb_br: [FaqBacenRetrieval, AssinSTS]
+      tasks: [Assin2STS, SICK-BR-STS]
+    mteb_br: {mteb_br: all}        # 22 tarefas nativas (arXiv:2607.04581) — principal
+    mteb_pt: {benchmark: "MTEB(por, v1)"}   # 14 datasets (arXiv:2607.04071)
+    longembed: {benchmark: LongEmbed, max_length: 32768, batch_size: 1}
+    eng_v2: {benchmark: "MTEB(eng, v2)"}
+    mmteb: {benchmark: "MTEB(Multilingual, v2)"}
+  instructions:
+    default: "Recupere textos semanticamente semelhantes"
+    by_type:
+      Retrieval: "Dada uma pergunta, recupere passagens que a respondam"
+      Reranking: "Dada uma pergunta, recupere passagens que a respondam"
+      InstructionRetrieval: "Dada uma pergunta, recupere passagens que a respondam"
+      STS: "Recupere textos com o mesmo significado"
+      PairClassification: "Recupere textos com o mesmo significado"
+      Classification: "Classifique o texto quanto ao tema, ao sentimento ou à intenção"
+      MultilabelClassification: "Classifique as emoções e os rótulos expressos no texto"
+      Clustering: "Identifique o tema principal do texto"
+      BitextMining: "Recupere a tradução do texto"
+      Summarization: "Recupere resumos semanticamente semelhantes"
+    by_task: {}
+  baselines:                       # Tabela 14; com instrução = recebem as mesmas instruções acima
+    Qwen/Qwen3-Embedding-4B:
+      revision: 5cf2132abc99cad020ac570b19d031efec650f2b
+      instruct_template: "Instruct: {instruction}\nQuery:"
+      batch_size: 32
+    Qwen/Qwen3-Embedding-8B:
+      revision: 1d8ad4ca9b3dd8059ad90a75d4983776a23d44af
+      instruct_template: "Instruct: {instruction}\nQuery:"
+      batch_size: 16
+    Qwen/Qwen3-Embedding-0.6B:
+      revision: 97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3
+      instruct_template: "Instruct: {instruction}\nQuery:"
+      batch_size: 64
+    intfloat/multilingual-e5-large-instruct:
+      revision: 274baa43b0e13e37fafa6428dbc7938e62e5c439
+      instruct_template: "Instruct: {instruction}\nQuery: "
+      batch_size: 64
+    Alibaba-NLP/gte-multilingual-base: {batch_size: 64}
+    nvidia/llama-embed-nemotron-8b: {batch_size: 16}

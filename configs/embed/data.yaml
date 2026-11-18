@@ -1,0 +1,190 @@
+# Dados (seção 2 do plano). Escala reduzida em relação à literatura (proposta), para caber
+# numa GPU; todas as quantidades são parâmetros.
+instructions:
+  qa: "Dada uma pergunta, recupere passagens que a respondam"
+  title: "Dado um título, recupere o trecho da enciclopédia correspondente"
+  bitext: "Recupere a tradução do texto"
+  sts: "Recupere textos com o mesmo significado"
+  en_qa: "Given a question, retrieve passages that answer it"
+  en_sts: "Retrieve semantically similar text"
+
+sources:
+  wikipedia:
+    repo: wikimedia/wikipedia
+    revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+    files: 20231101.pt/*.parquet
+    n_pairs: 150000
+    sections_per_article: 2
+    max_words: 300
+  mmarco:
+    repo: unicamp-dl/mmarco
+    revision: 6d039c4638c0ba3e46a9cb7b498b145e7edc6230
+    queries: data/google/queries/train/portuguese_queries.train.tsv
+    triples: data/triples.train.ids.small.tsv
+    collection: data/google/collections/portuguese_collection.tsv
+    n_queries: 150000
+    r1_queries: 30000              # receita R1: 63 negativos BM25 por query
+    r1_negatives: 63
+    other_negatives: 4
+  bitext:
+    - repo: sentence-transformers/parallel-sentences-talks
+      revision: 0c70bc6714efb1df12f8a16b9056e4653563d128
+      files: en-pt-br/train-*.parquet
+      n: 40000
+    - repo: sentence-transformers/parallel-sentences-tatoeba
+      revision: cec1343ab5a7a8befe99af4a2d0ca847b6c84743
+      files: en-pt/train-*.parquet
+      n: 20000
+  english:
+    gooaq:
+      repo: sentence-transformers/gooaq
+      revision: b089f728748a068b7bc5234e5bcf5b25e3c8279c
+      files: pair/*.parquet
+      n: 30000
+    allnli:
+      repo: sentence-transformers/all-nli
+      revision: d482672c8e74ce18da116f430137434ba2e52fab
+      files: triplet/train-*.parquet
+      n: 30000
+  fineweb2:
+    repo: HuggingFaceFW/fineweb-2
+    revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+    files: data/por_Latn/train/000_00000.parquet
+  fineweb_edu:
+    repo: HuggingFaceFW/fineweb-edu
+    revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+    files: sample/10BT/000_00000.parquet
+
+seeds:
+  n_wikipedia: 150000
+  n_fineweb2: 150000
+  n_long: 30000
+  min_words: 80
+  max_words: 350
+  long_min_chars: 9000             # ~2k tokens
+  long_max_chars: 32000            # ~8k tokens
+
+s0:
+  n_texts: 64000                   # MNTP: 32 × 1000 passos, mais folga
+  multidomain_fraction: 0.2
+
+synth:
+  chunk: 5000
+  long_window_words: 300
+  type_weights: {keywords: 0.2, acquire_knowledge: 0.35, summary: 0.15, yes_or_no: 0.1, background: 0.2}
+  personas:
+    - um estudante do ensino médio de Belo Horizonte
+    - uma professora de história da rede pública
+    - um advogado tributarista de São Paulo
+    - uma enfermeira de um hospital do SUS
+    - um agricultor familiar do interior do Paraná
+    - uma servidora pública federal de Brasília
+    - um jornalista de política
+    - uma médica de família
+    - um contador de uma pequena empresa
+    - uma estudante de engenharia
+    - um aposentado curioso por ciência
+    - uma empreendedora que abriu um MEI
+    - um motorista de aplicativo
+    - uma pesquisadora de biologia
+    - um torcedor de futebol de Recife
+    - uma bibliotecária
+    - um programador de Porto Alegre
+    - uma nutricionista
+    - um policial militar
+    - uma artista plástica de Salvador
+    - um economista de banco
+    - uma mãe pesquisando sobre a escola dos filhos
+    - um vestibulando de medicina
+    - uma guia de turismo da Amazônia
+    - um pastor evangélico
+    - uma assistente social
+    - um farmacêutico
+    - uma juíza do trabalho
+    - um engenheiro civil
+    - uma cientista de dados
+    - um historiador amador
+    - uma geógrafa
+    - um músico de MPB
+    - uma estudante de direito
+    - um técnico de futebol de várzea
+    - uma corretora de imóveis
+    - um bombeiro
+    - uma cozinheira de restaurante
+    - um eletricista
+    - uma pessoa idosa aprendendo a usar a internet
+  generators:                       # três LLMs abertos (Apache 2.0), cada um com sementes diferentes
+    qwen3_30b:
+      model: Qwen/Qwen3-30B-A3B-Instruct-2507
+      revision: 0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe
+      n_retrieval: 60000
+      n_sts: 20000
+      n_long: 8000
+      max_model_len: 16384
+      temperature: 0.8
+      max_tokens: 256
+    mistral_24b:
+      model: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+      revision: 95a6d26c4bfb886c58daf9d3f7332c857cb27b43
+      engine_kwargs: {tokenizer_mode: mistral, config_format: mistral, load_format: mistral}
+      n_retrieval: 60000
+      n_sts: 20000
+      n_long: 8000
+      max_model_len: 16384
+      temperature: 0.7
+      max_tokens: 256
+    gpt_oss_20b:
+      model: openai/gpt-oss-20b
+      revision: 6cee5e81ee83917806bbde320786a8fb61efebee
+      system: "Reasoning: low"
+      n_retrieval: 60000
+      n_sts: 20000
+      n_long: 8000
+      max_model_len: 16384
+      temperature: 0.8
+      max_tokens: 1024             # inclui o raciocínio curto do gpt-oss
+
+decontamination:                    # política zero-shot limpo (seção 2.5)
+  benchmarks: [mteb_br, "MTEB(por, v1)", LongEmbed, "MTEB(eng, v2)"]
+  ngram: 13
+  stride: 2
+  threshold: 0.3                    # fração dos 13-gramas do texto presentes nos textos de avaliação
+  excluded_datasets: [assin, sick-br, stsb, hatebr, toxsyn, factck, portulex, brighter, inferbr, quati,
+                      juristcu, brtaxqa, faquad, bacen, medpt, scielo, stackoverflow, massive, tweet_sentiment,
+                      multihate, multi-hate, webfaq, mldr, xglue, mteb/]
+  inputs: [raw/wiki_pt.jsonl, raw/mmarco_pt.jsonl, raw/bitext.jsonl, raw/english.jsonl,
+           synth/qwen3_30b.jsonl, synth/mistral_24b.jsonl, synth/gpt_oss_20b.jsonl]
+
+mining:                             # seção 2.4
+  model: Qwen/Qwen3-Embedding-4B
+  revision: 5cf2132abc99cad020ac570b19d031efec650f2b
+  query_template: "Instruct: {instruction}\nQuery:{query}"
+  default_instruction: "Given a web search query, retrieve relevant passages that answer the query"
+  max_len: 1024
+  max_len_long: 8192
+  gpu_memory_utilization: 0.45      # o resto da GPU fica para a busca top-k
+  embed_chunk: 200000
+  search_top: 64
+  store_negatives: 8
+  percpos: 0.95                     # TopK-PercPos
+  synthetic_min_cos: 0.7            # filtro do Qwen3-Embedding
+  positive_rank_check: 10           # positivo precisa estar no top-10 do teacher (proposta)
+  min_negatives: 1
+  inputs: [clean/wiki_pt.jsonl, clean/mmarco_pt.jsonl, clean/bitext.jsonl, clean/english.jsonl,
+           clean/qwen3_30b.jsonl, clean/mistral_24b.jsonl, clean/gpt_oss_20b.jsonl]
+
+mix:                                # Tabela 3 do plano
+  inputs: [mined/retrieval.jsonl, mined/retrieval_long.jsonl, mined/sts.jsonl, mined/bitext.jsonl]
+  dev_per_component: 300
+  dev_long: 300
+  s1:
+    size: 400000
+    negatives: 1
+    proportions: {natural: 0.30, synth_retrieval: 0.45, synth_other: 0.05, mmarco: 0.10, en_bitext: 0.10}
+  s2:
+    size: 120000
+    negatives: 4
+    proportions: {natural: 0.15, synth_retrieval: 0.25, synth_other: 0.20, mmarco: 0.10, labeled_pt: 0.20,
+                  en_bitext: 0.10}
+  r1_input: clean/mmarco_pt.jsonl
+  r1_negatives: 63

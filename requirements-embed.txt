@@ -1,0 +1,17 @@
+# Ambiente de treino/avaliação do Lumi-Embed (venv isolado criado pelo run_embed.sh com uv).
+# O torch (2.12.1+cu130) é instalado antes, do índice https://download.pytorch.org/whl/cu130:
+# é a versão para a qual existem os kernels Mamba-2 do Hub (kernels-community/mamba-ssm).
+# O MTEB-BR (22 tarefas nativas) é instalado à parte, fixado no commit 5f45dbc, sem dependências.
+transformers==5.23.0
+peft==0.21.3
+accelerate==1.16.0
+kernels==0.18.3
+sentence-transformers==6.3.0
+mteb==2.27.18
+datasets==5.2.0
+huggingface_hub==2.4.0
+pyarrow==26.0.1
+pandas==3.1.1
+matplotlib==3.11.2
+PyYAML==6.0.3
+pytest==9.2.0

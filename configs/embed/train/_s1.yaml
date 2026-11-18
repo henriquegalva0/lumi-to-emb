@@ -1,0 +1,20 @@
+# Estágio S1 — contrastivo fraco (Tabela 6 do plano): InfoNCE τ = 0,02, 1 negativo difícil por
+# exemplo, batch efetivo grande (2048, via GradCache), negativos do batch com máscara de falso negativo.
+inherit: ../base.yaml
+data: {train: sets/S1/train.jsonl, dev: sets/S1/dev.jsonl, negatives_per_example: 1}
+loss: {mode: inbatch, temperature: 0.02, fn_margin: 0.1}
+train:
+  stage: s1
+  method: lora                     # D3 / A10
+  lora: {r: 16, alpha: 16, dropout: 0.0}
+  lr: 4.0e-4                       # varrer até 2,4e-3 (C1-sweep-*): Mamba pode pedir LR maior
+  batch_size: 2048
+  micro_batch: 64
+  epochs: 1
+  warmup_steps: 100
+  optimizer: {weight_decay: 0.01}
+  max_grad_norm: 1.0
+  gradient_checkpointing: true
+  save_every_min: 30
+  eval_every: 25
+  log_every: 1

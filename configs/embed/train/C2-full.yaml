@@ -1,0 +1,3 @@
+# A10: fine-tuning completo (pesos mestres fp32 + autocast bf16).
+inherit: C2.yaml
+train: {method: full, lr: 2.0e-6}

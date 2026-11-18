@@ -1,0 +1,8 @@
+# Merge do trilho causal (seção 4.5). Conjunto candidato fixado antes de olhar os testes.
+name: M-C
+candidates: [C2, C2-real, C2-syn, C2-s2, C2-s3]
+slerp_pairs: [[C2-real, C2-syn]]
+slerp_t: [0.25, 0.5, 0.75]
+anchor: R0                         # lumi-4b sem treino (exportado por `export-base`)
+base_lambdas: [0.25, 0.5, 0.75]
+dev: sets/S2/dev.jsonl

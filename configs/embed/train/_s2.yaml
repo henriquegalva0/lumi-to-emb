@@ -1,0 +1,19 @@
+# Estágio S2 — supervisionado (Tabela 6): InfoNCE τ = 0,02 só com 4 negativos difíceis
+# (TopK-PercPos), batch 128. Com LoRA, continua do S1 com os pesos já fundidos.
+inherit: ../base.yaml
+data: {train: sets/S2/train.jsonl, dev: sets/S2/dev.jsonl, negatives_per_example: 4}
+loss: {mode: hn, temperature: 0.02}
+train:
+  stage: s2
+  method: lora
+  lora: {r: 16, alpha: 16, dropout: 0.0}
+  lr: 1.0e-4                       # proposta (o plano fixa só o LR do fine-tuning completo: 2e-6)
+  batch_size: 128
+  micro_batch: 16
+  epochs: 1
+  warmup_steps: 100
+  optimizer: {weight_decay: 0.01}
+  gradient_checkpointing: true
+  save_every_min: 30
+  eval_every: 100
+  log_every: 10

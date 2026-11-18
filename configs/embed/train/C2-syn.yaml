@@ -1,0 +1,3 @@
+# A2: só sintéticos, mesma escala.
+inherit: C2.yaml
+data: {train: sets/S2-syn/train.jsonl}

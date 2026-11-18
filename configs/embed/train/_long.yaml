@@ -1,0 +1,11 @@
+# Estágio S-long (opcional): mesmo objetivo do S2 com documentos de 2k a 8k tokens e currículo
+# de comprimento 2k → 4k → 8k. Lembrete da Etapa 1: o Lumi colapsa na geração a partir de 64k.
+inherit: _s2.yaml
+data: {train: sets/long/train.jsonl, dev: sets/long/dev.jsonl, negatives_per_example: 4}
+embedding: {max_length: 8192}
+train:
+  stage: long
+  batch_size: 32
+  micro_batch: 2
+  length_schedule: [[0.0, 2048], [0.34, 4096], [0.67, 8192]]
+  eval_every: 50

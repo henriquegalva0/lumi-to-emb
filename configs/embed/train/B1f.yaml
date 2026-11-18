@@ -1,0 +1,3 @@
+inherit: _s1.yaml
+init: ckpt:B0f
+embedding: {direction: Bf, pooling: mean}

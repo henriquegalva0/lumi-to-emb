@@ -1,0 +1,3 @@
+# Modelo causal principal.
+inherit: _s2.yaml
+init: ckpt:C1

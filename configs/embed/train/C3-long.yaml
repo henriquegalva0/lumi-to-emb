@@ -1,0 +1,3 @@
+# A13: contexto longo a partir do C2.
+inherit: _long.yaml
+init: ckpt:C2

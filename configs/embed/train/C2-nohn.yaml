@@ -1,0 +1,4 @@
+# A3: sem negativos difíceis (só os do batch).
+inherit: C2.yaml
+data: {train: sets/S2-nohn/train.jsonl, negatives_per_example: 0}
+loss: {mode: inbatch}
