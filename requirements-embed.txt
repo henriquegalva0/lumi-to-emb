@@ -6,6 +6,7 @@ transformers==5.23.0
 peft==0.21.3
 accelerate==1.16.0
 kernels==0.18.3
+einops==0.8.2                   # exigido pelo kernel mamba-ssm do Hub (python-depends do metadata.json)
 sentence-transformers==6.3.0
 mteb==2.27.18
 datasets==5.2.0

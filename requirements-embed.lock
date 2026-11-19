@@ -37,6 +37,8 @@ dill==0.4.1
     # via
     #   datasets
     #   multiprocess
+einops==0.8.2
+    # via -r /private/tmp/claude-501/-Users-henriquegalvaodasilva-Documents-Projetos-Pessoais-Lumi-EMBEDDING/bfecccc3-3c13-4fa7-9631-28c64ec72c22/scratchpad/all.in
 filelock==4.2.12
     # via
     #   datasets
