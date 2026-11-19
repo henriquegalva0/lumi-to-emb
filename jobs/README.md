@@ -111,7 +111,13 @@ chama `sauron submit`. Os perfis:
 | GPU | 160 | B200 (~179 GB da cota) | `check`, `synth`, `mine`, `train`, `merge`, `eval`, `baseline`, `verify`, `export-base` |
 | CPU | 20 | a menor classe (~89 GB da cota) | `setup`, `selftest`, `sources`, `decontam`, `mix`, `report`, `publish`, `card`, `diagnose` |
 
-Com 268 GB de cota, **um job de cada perfil cabe ao mesmo tempo**. Dois jobs de GPU ao
+Com 268 GB de cota, **um job de cada perfil cabe ao mesmo tempo**. Para rodar uma avaliação (inferência) na classe menor enquanto a B200 treina ou sintetiza, force o perfil:
+
+```bash
+LUMI_PROFILE=small bash jobs/embed/submit.sh eval R0 smoke mteb_br mteb_pt
+```
+
+O treino, a síntese, a mineração e o merge continuam na B200. Dois jobs de GPU ao
 mesmo tempo, não: o segundo fica na fila até o primeiro terminar.
 
 **Uma regra:** não rode dois jobs que escrevam a mesma coisa ao mesmo tempo. Na prática:

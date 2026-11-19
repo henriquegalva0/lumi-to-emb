@@ -6,12 +6,13 @@
 #   bash jobs/embed/submit.sh synth --generator qwen3_30b
 #   bash jobs/embed/submit.sh train C1
 #   bash jobs/embed/submit.sh eval C2 mteb_br mteb_pt
+#   LUMI_PROFILE=small bash jobs/embed/submit.sh eval R0 mteb_br   (classe menor de GPU)
 # Gera jobs/embed/.generated/<nome>.{yaml,sh} com o perfil de recursos da etapa e chama
 # `sauron submit`. Perfis: "gpu" = B200 (vram 160, ~179 GB da cota); "cpu" = a menor classe
 # de GPU (vram 20), para etapas sem GPU — as duas cabem juntas numa cota de 268 GB.
 set -euo pipefail
 trap 'echo "ERRO: submit.sh falhou na linha $LINENO (comando: $BASH_COMMAND)" >&2' ERR
-[ $# -ge 1 ] || { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+[ $# -ge 1 ] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 STEP="$1"; shift
 CLONE="$(cd "$(dirname "$0")/../.." && pwd)"
 WS_ROOT="$HOME/workspace"
@@ -35,6 +36,15 @@ case "$STEP" in
   synth|mine)              hours=12 ;;
   train|eval|baseline)     hours=12 ;;
   merge)                   hours=6; mem=32g ;;
+esac
+# LUMI_PROFILE=small força a classe menor de GPU (vram 20) numa etapa que normalmente usa a B200.
+# Útil para avaliações (inferência de um modelo de 4B cabe com folga) em paralelo com um treino
+# ou síntese na B200: 179 + 89 GB cabem juntos numa cota de 268 GB.
+case "${LUMI_PROFILE:-}" in
+  "") ;;
+  small|cpu) profile=cpu ;;
+  gpu) profile=gpu ;;
+  *) echo "ERRO: LUMI_PROFILE deve ser 'small' ou 'gpu' (recebido: $LUMI_PROFILE)" >&2; exit 2 ;;
 esac
 vram=160; [ "$profile" = cpu ] && vram=20
 SUFFIX=""
@@ -61,6 +71,7 @@ set -e
 ${SUBDIR:+cd $(printf '%q' "$SUBDIR")}
 bash run_embed.sh $(printf '%q' "$STEP")$ARGS
 SH
-echo "Job: $NAME (perfil $profile, até ${hours}h)  →  $GEN/$NAME.yaml"
+plabel="B200, vram 160"; [ "$profile" = cpu ] && plabel="classe menor de GPU, vram 20"
+echo "Job: $NAME ($plabel, até ${hours}h)  →  $GEN/$NAME.yaml"
 cd "$CLONE"
 sauron submit -c "$GEN/$NAME.yaml" "$GEN/$NAME.sh"
