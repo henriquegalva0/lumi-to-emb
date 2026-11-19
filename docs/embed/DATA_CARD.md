@@ -77,6 +77,7 @@ Política **zero-shot limpo** ([`decontaminate.py`](../../src/lumi_embed/data/de
 3. **Filtro:**
    - o exemplo sai se a query ou o positivo aparece inteiro na avaliação, ou se ≥ 30 % dos seus 13-gramas estão no índice;
    - negativos contaminados saem sozinhos.
+   - **qualidade:** sai também o texto "spinado" de fazendas de conteúdo (sinônimos trocados automaticamente, com marcas como "situaçãeste" e "atuaçãeste"), encontrado nas sementes da FineWeb-2 ao inspecionar a primeira síntese.
 4. **Relatório:** `results/embed/contamination/report.md`, com contagens por arquivo e por tarefa indexada. Ele é copiado para `docs/embed/` quando o `report` é gerado.
 
 **Dev set:** 300 exemplos por componente, separados **antes** dos conjuntos de treino. Ele escolhe checkpoints, LR e coeficientes de merge. Os benchmarks de teste nunca entram nessa escolha.

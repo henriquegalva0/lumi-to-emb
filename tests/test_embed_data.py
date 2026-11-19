@@ -303,3 +303,37 @@ def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
     ret = [json.loads(x) for x in (tmp_path / "data/embed/mined/retrieval.jsonl").read_text().splitlines()]
     assert sum(len(r["negatives"]) for r in ret) > 0  # outras cidades viram negativos
     assert (tmp_path / "data/embed/mined/stats.json").exists()
+
+
+def test_spun_text_filter():
+    # Texto "spinado" da web (troca automática de "o" por "este", inclusive no fim de palavras)
+    from lumi_embed.data.decontaminate import is_spun
+
+    assert is_spun("Vejam a situaçãeste do Estado do Rio, recordista em terceirizações.")
+    assert is_spun("Com a plateia lotada de modo a assistir à sua atuaçãeste, Myrthes surpreendeu este juiz")
+    for ok in ("A mãe e as irmãs estão nesta situação.", "Os alemães e os cães, este e aquele.",
+               "As lições desta questão são essas.", "Irmã, esta é a capital."):
+        assert not is_spun(ok), ok
+
+
+def test_run_decontaminate_drops_spun_examples_and_negatives(data_cfg, tmp_path, monkeypatch):
+    from lumi_embed.data import decontaminate as dc
+
+    empty = {"ngrams": np.array([], dtype=np.uint64), "texts": np.array([], dtype=np.uint64),
+             "meta": {"n_texts": 0, "n_ngrams": 0, "tasks": {}}}
+    monkeypatch.setattr(dc, "build_index", lambda cfg: dict(empty))
+    rows = [
+        make_example("retrieval", "pt-BR", "i", "qual a situação do estado?", "Vejam a situaçãeste do Estado.", {"dataset": "x"}),
+        make_example("retrieval", "pt-BR", "i", "qual a capital do Brasil?", "Brasília é a capital do Brasil.",
+                     {"dataset": "x"}, negatives=["Com a sua atuaçãeste, ele venceu.", "Rio de Janeiro foi capital."]),
+    ]
+    raw = tmp_path / "data/embed/raw"
+    raw.mkdir(parents=True)
+    (raw / "t.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
+    data_cfg["decontamination"]["inputs"] = ["raw/t.jsonl"]
+    rep = dc.run_decontaminate(data_cfg)
+    s = rep["files"]["raw/t.jsonl"]
+    assert s == {"in": 2, "kept": 1, "dropped": {"spun": 1}, "negatives_dropped": 1}
+    kept = [json.loads(x) for x in (tmp_path / "data/embed/clean/t.jsonl").read_text().splitlines()]
+    assert [n["text"] for n in kept[0]["negatives"]] == ["Rio de Janeiro foi capital."]
+    assert "spinado" in (tmp_path / "results/embed/contamination/report.md").read_text()

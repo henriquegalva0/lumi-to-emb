@@ -154,6 +154,15 @@ def build_index(cfg: dict) -> dict:
 
 # --------------------------------------------------------------------------- filtro
 
+# Texto "spinado" (fazendas de conteúdo que trocam palavras por sinônimos automaticamente): a troca
+# de "o" por "este" no fim de palavras deixa marcas como "situaçãeste" e "atuaçãeste". Em português
+# correto, "ã"/"õ" seguido de um demonstrativo dentro da mesma palavra praticamente não ocorre.
+SPUN = re.compile(r"\w[ãõ](?:este|esta|esse|essa|aquele|aquela|isto|isso)\b", re.IGNORECASE)
+
+
+def is_spun(text: str) -> bool:
+    return bool(SPUN.search(text or ""))
+
 
 def overlap_ratio(hasher: Hasher, text: str, index_ngrams: np.ndarray, n: int) -> float:
     g = hasher.ngrams(text, n, 1)
@@ -198,6 +207,7 @@ def run_decontaminate(cfg: dict) -> dict:
     index = build_index(cfg)
     hasher = Hasher()
     n, thr = int(dcfg["ngram"]), float(dcfg["threshold"])
+    quality = bool(dcfg.get("drop_spun_text", True))
     report = {"benchmarks": dcfg["benchmarks"], "ngram": n, "stride": int(dcfg["stride"]), "threshold": thr,
               "eval_index": index["meta"], "files": {}}
     for f in files:
@@ -208,6 +218,9 @@ def run_decontaminate(cfg: dict) -> dict:
         with open(out, "w", encoding="utf-8") as fh:
             for ex in iter_jsonl(data_dir(f)):
                 total += 1
+                if quality and (is_spun(ex["query"]) or is_spun(ex["positive"])):
+                    reasons["spun"] += 1
+                    continue
                 why = is_contaminated(hasher, ex["query"], index, n, thr) or \
                     is_contaminated(hasher, ex["positive"], index, n, thr)
                 if why:
@@ -216,8 +229,9 @@ def run_decontaminate(cfg: dict) -> dict:
                 for field in ("negatives", "naive_negatives", "bm25_negatives"):
                     if ex.get(field):
                         before = len(ex[field])
-                        ex[field] = [x for x in ex[field] if not is_contaminated(
-                            hasher, x["text"] if isinstance(x, dict) else x, index, n, thr)]
+                        ex[field] = [x for x in ex[field] if not (
+                            (quality and is_spun(x["text"] if isinstance(x, dict) else x))
+                            or is_contaminated(hasher, x["text"] if isinstance(x, dict) else x, index, n, thr))]
                         neg_dropped += before - len(ex[field])
                 fh.write(json.dumps(ex, ensure_ascii=False) + "\n")
                 kept += 1
@@ -235,11 +249,14 @@ def render_report(r: dict) -> str:
              f"{r['threshold']:.0%}, mais igualdade exata de textos normalizados.\n",
              f"Índice: {r['eval_index']['n_texts']} textos, {r['eval_index']['n_ngrams']} n-gramas, "
              f"{len(r['eval_index']['tasks'])} tarefas.\n",
-             "| Arquivo | Entrada | Mantidos | Removidos (exato) | Removidos (n-grama) | Negativos removidos |",
-             "|---|---|---|---|---|---|"]
+             "Além da contaminação, sai o texto \"spinado\" (sinônimos trocados automaticamente, com marcas "
+             "como \"situaçãeste\"), vindo de fazendas de conteúdo na web.\n",
+             "| Arquivo | Entrada | Mantidos | Removidos (exato) | Removidos (n-grama) | Removidos (spinado) "
+             "| Negativos removidos |",
+             "|---|---|---|---|---|---|---|"]
     for f, s in r["files"].items():
         lines.append(f"| `{f}` | {s['in']} | {s['kept']} | {s['dropped'].get('exact', 0)} | "
-                     f"{s['dropped'].get('ngram', 0)} | {s['negatives_dropped']} |")
+                     f"{s['dropped'].get('ngram', 0)} | {s['dropped'].get('spun', 0)} | {s['negatives_dropped']} |")
     lines.append("\nTarefas indexadas (número de textos):\n")
     lines += [f"- {t}: {c}" for t, c in sorted(r["eval_index"]["tasks"].items())]
     return "\n".join(lines) + "\n"

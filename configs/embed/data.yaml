@@ -149,6 +149,7 @@ decontamination:                    # política zero-shot limpo (seção 2.5)
   ngram: 13
   stride: 2
   threshold: 0.3                    # fração dos 13-gramas do texto presentes nos textos de avaliação
+  drop_spun_text: true              # remove texto "spinado" da web (ex.: "situaçãeste"); ver decontaminate.py
   excluded_datasets: [assin, sick-br, stsb, hatebr, toxsyn, factck, portulex, brighter, inferbr, quati,
                       juristcu, brtaxqa, faquad, bacen, medpt, scielo, stackoverflow, massive, tweet_sentiment,
                       multihate, multi-hate, webfaq, mldr, xglue, mteb/]
