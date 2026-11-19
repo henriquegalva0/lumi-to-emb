@@ -202,3 +202,104 @@ def test_mmarco_samples_only_queries_with_triples(data_cfg, tmp_path, monkeypatc
     rows = [json.loads(x) for x in (tmp_path / "data/embed/raw/mmarco_pt.jsonl").read_text().splitlines()]
     assert all(int(r["source"]["qid"]) % 2 == 0 for r in rows)
     assert sorted(len(r["bm25_negatives"]) for r in rows) == [1, 1, 1, 1, 4, 4]
+
+
+def test_run_synth_end_to_end_with_fake_vllm(data_cfg, tmp_path, monkeypatch):
+    # O laço completo da síntese (geração em lotes, filtros, gravação, retomada) com um vLLM falso.
+    # Regressão: a pasta data/embed/synth/ não existia e o primeiro lote se perdia ao gravar.
+    import sys
+    import types
+
+    calls = {"llm": 0, "convs": 0}
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            calls["llm"] += 1
+
+        def chat(self, convs, sp, use_tqdm=False, chat_template_kwargs=None):
+            calls["convs"] += len(convs)
+            outs = []
+            for conv in convs:
+                prompt = conv[-1]["content"]
+                if prompt.startswith("Reescreva a frase"):
+                    text = ('{"parafrase": "Uma frase reescrita com outras palavras para o teste", '
+                            '"contraste": "Uma frase parecida com sentido diferente"}')
+                else:
+                    text = 'assistantfinal{"query": "qual universidade antiga existe na cidade?"}'
+                outs.append(types.SimpleNamespace(outputs=[types.SimpleNamespace(text=text)]))
+            return outs
+
+    fake = types.ModuleType("vllm")
+    fake.LLM = FakeLLM
+    fake.SamplingParams = lambda **kw: kw
+    monkeypatch.setitem(sys.modules, "vllm", fake)
+    from lumi_embed.data.synth import run_synth
+
+    data_cfg["synth"]["chunk"] = 7
+    key = list(data_cfg["synth"]["generators"])[0]
+    assert not (tmp_path / "data/embed/synth").exists()
+    res = run_synth(data_cfg, key)
+    rows = [json.loads(x) for x in (tmp_path / "data/embed/synth" / f"{key}.jsonl").read_text().splitlines()]
+    assert res["new"] == len(rows) == calls["convs"] > 7  # mais de um lote, nada rejeitado
+    assert {r["task"] for r in rows} == {"retrieval", "sts"} and any(r["source"].get("long") for r in rows)
+    # retomada: tudo já feito, o modelo nem é carregado de novo
+    res2 = run_synth(data_cfg, key)
+    assert res2["new"] == 0 and calls["llm"] == 1
+
+
+def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
+    # O laço completo da mineração com um "teacher" falso (saco de palavras com hash), na CPU.
+    pytest.importorskip("torch")
+    import hashlib
+    import sys
+    import types
+
+    def bow(text: str, dim: int = 128) -> list[float]:
+        v = [0.0] * dim
+        for w in text.lower().replace("?", " ").replace(".", " ").split():
+            v[int(hashlib.md5(w.encode()).hexdigest(), 16) % dim] += 1.0
+        return v
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            assert kwargs.get("runner") == "pooling"
+
+        def embed(self, texts, use_tqdm=False, tokenization_kwargs=None):
+            assert tokenization_kwargs["truncation"] is True
+            return [types.SimpleNamespace(outputs=types.SimpleNamespace(embedding=bow(t))) for t in texts]
+
+    fake = types.ModuleType("vllm")
+    fake.LLM = FakeLLM
+    monkeypatch.setitem(sys.modules, "vllm", fake)
+    from lumi_embed.data.mine import run_mine
+
+    rows = []
+    for i in range(24):
+        rows.append(make_example("retrieval", "pt-BR", "inst", f"quando a cidade{i} foi fundada?",
+                                 f"A cidade{i} foi fundada no século XIX e tem um museu de arte.", {"dataset": "x"}))
+    for i in range(3):
+        rows.append(make_example("retrieval", "pt-BR", "inst", f"o que diz o trecho {i} do documento?",
+                                 f"documento longo {i} " + "palavra " * 50, {"gen": "g", "long": True}))
+    for i in range(6):
+        rows.append(make_example("sts", "pt-BR", "inst", f"o rio{i} corta a cidade de norte a sul",
+                                 f"a cidade é atravessada pelo rio{i} de norte a sul", {"gen": "g"},
+                                 negatives=[{"text": f"o rio{i} corta a cidade de leste a oeste", "kind": "contraste"}]))
+    clean = tmp_path / "data/embed/clean"
+    clean.mkdir(parents=True)
+    (clean / "a.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
+    data_cfg["mining"].update(inputs=["clean/a.jsonl"], embed_chunk=10, synthetic_min_cos=0.0, positive_rank_check=64)
+
+    stats = run_mine(data_cfg)
+    assert set(stats) == {"retrieval", "retrieval_long", "sts"}
+    for fam, st in stats.items():
+        assert st["in"] == st["out"] + st["drop_low_cos"] + st["drop_rank"], fam
+        out = [json.loads(x) for x in (tmp_path / "data/embed/mined" / f"{fam}.jsonl").read_text().splitlines()]
+        assert len(out) == st["out"]
+        for r in out:
+            assert r["positive"] not in {n["text"] for n in r["negatives"]}
+            assert isinstance(r["pos_score"], float) and r["teacher"]["rank_pos"] >= 1
+    sts = [json.loads(x) for x in (tmp_path / "data/embed/mined/sts.jsonl").read_text().splitlines()]
+    assert all(r["negatives"][0]["kind"] == "contraste" for r in sts)
+    ret = [json.loads(x) for x in (tmp_path / "data/embed/mined/retrieval.jsonl").read_text().splitlines()]
+    assert sum(len(r["negatives"]) for r in ret) > 0  # outras cidades viram negativos
+    assert (tmp_path / "data/embed/mined/stats.json").exists()

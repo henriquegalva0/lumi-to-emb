@@ -163,7 +163,7 @@ mining:                             # seção 2.4
   max_len: 1024
   max_len_long: 8192
   gpu_memory_utilization: 0.45      # o resto da GPU fica para a busca top-k
-  embed_chunk: 200000
+  embed_chunk: 16384                # textos por chamada ao teacher (limita a RAM das listas do vLLM)
   search_top: 64
   store_negatives: 8
   percpos: 0.95                     # TopK-PercPos

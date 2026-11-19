@@ -71,12 +71,15 @@ class Teacher:
                        gpu_memory_utilization=float(mcfg.get("gpu_memory_utilization", 0.5)), seed=0)
 
     def embed(self, texts: list[str]):
+        import numpy as np
         import torch
 
         outs = self.llm.embed(texts, use_tqdm=False,
                               tokenization_kwargs={"truncation": True, "max_length": self.max_len})
-        e = torch.tensor([o.outputs.embedding for o in outs], dtype=torch.float32)
-        return torch.nn.functional.normalize(e, dim=-1).half().cuda()
+        # O vLLM devolve listas Python; numpy converte bem mais rápido que torch.tensor(lista de listas)
+        e = torch.from_numpy(np.asarray([o.outputs.embedding for o in outs], dtype=np.float32))
+        e = torch.nn.functional.normalize(e, dim=-1)
+        return e.half().cuda() if torch.cuda.is_available() else e
 
     def query_text(self, ex: dict) -> str:
         inst = ex.get("instruction") or self.cfg["default_instruction"]
@@ -107,7 +110,7 @@ def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: 
     if symmetric:  # nas tarefas simétricas o teacher também recebe a instrução nos documentos
         inst = rows[0].get("instruction") or mcfg["default_instruction"]
         d_inputs = [mcfg["query_template"].format(instruction=inst, query=d) for d in docs]
-    bs = int(mcfg.get("embed_chunk", 200_000))
+    bs = int(mcfg.get("embed_chunk", 16384))
     Q = torch.cat([teacher.embed(q_inputs[i : i + bs]) for i in range(0, len(q_inputs), bs)])
     D = torch.cat([teacher.embed(d_inputs[i : i + bs]) for i in range(0, len(d_inputs), bs)])
     k_store, top = int(mcfg["store_negatives"]), int(mcfg["search_top"])

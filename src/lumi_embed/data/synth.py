@@ -177,6 +177,7 @@ def run_synth(cfg: dict, gen_key: str) -> dict:
     gcfg = scfg["generators"][gen_key]
     seed = int(cfg.get("seed", 1234))
     out_path = data_dir("synth", f"{gen_key}.jsonl")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     done = {r["source"]["seed_id"] + "|" + r["task"] for r in iter_jsonl(out_path)} if out_path.exists() else set()
     reqs = build_requests(cfg, gen_key, keys.index(gen_key), len(keys), seed)
     kind_task = {"retrieval": "retrieval", "long": "retrieval", "sts": "sts"}

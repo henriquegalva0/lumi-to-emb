@@ -34,7 +34,8 @@ case "$STEP" in
   publish|card)            profile=cpu; hours=3; mem=16g; cpus=2 ;;
   check|export-base|verify) hours=2 ;;
   synth|mine)              hours=12 ;;
-  train|eval|baseline)     hours=12 ;;
+  train|baseline)          hours=12 ;;
+  eval)                    hours=12; mem=32g ;;   # pico medido no MTEB-BR/PT: 7,4 GB
   merge)                   hours=6; mem=32g ;;
 esac
 # LUMI_PROFILE=small força a classe menor de GPU (vram 20) numa etapa que normalmente usa a B200.
