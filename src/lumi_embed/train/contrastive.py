@@ -166,6 +166,17 @@ class TrainState:
 # --------------------------------------------------------------------------- laço
 
 
+def warmup_steps(tcfg: dict, total: int) -> int:
+    """Passos de aquecimento: `warmup_steps` explícito ou `warmup_ratio` × total (padrão 10 %).
+
+    A proporção acompanha a escala: com 195 passos no S1, 100 passos fixos seriam metade do treino,
+    e numa varredura de LR curta a taxa nunca chegaria ao valor testado.
+    """
+    if tcfg.get("warmup_steps") is not None:
+        return int(tcfg["warmup_steps"])
+    return max(1, math.ceil(float(tcfg.get("warmup_ratio", 0.1)) * total))
+
+
 def lr_lambda(warmup: int, total: int):
     def f(step: int) -> float:
         if step < warmup:
@@ -209,7 +220,10 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
     ocfg = tcfg.get("optimizer", {})
     optim = torch.optim.AdamW(params, lr=float(tcfg["lr"]), weight_decay=float(ocfg.get("weight_decay", 0.01)),
                               betas=tuple(ocfg.get("betas", (0.9, 0.999))), fused=device.type == "cuda")
-    sched = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda(int(tcfg.get("warmup_steps", 100)), total))
+    warmup = warmup_steps(tcfg, total)
+    sched = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda(warmup, total))
+    log.info("%s: %d passos (aquecimento %d), lr %.2e, lote %d", ckpt_id, total, warmup, float(tcfg["lr"]),
+             int(tcfg["batch_size"]))
 
     state = TrainState(out)
     step, epoch, cursor = 0, 0, 0

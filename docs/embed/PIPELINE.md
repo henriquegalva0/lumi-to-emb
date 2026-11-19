@@ -33,7 +33,7 @@ setup → check → eval R0/R0e (referência zero-shot)
 | 7 | `decontam` | não | Índice dos textos das tarefas de avaliação e filtro de contaminação | `data/embed/clean/`, `results/embed/contamination/` |
 | 8 | `mine` | sim | Teacher Qwen3-Embedding-4B: filtro de cosseno, positivo no top-10 e negativos TopK-PercPos e ingênuos | `data/embed/mined/` |
 | 9 | `mix` | não | Conjuntos S1, S2, S2-real, S2-syn, S2-naivehn, S2-nohn, R1, S-long e dev | `data/embed/sets/`, `sets/manifest.json` |
-| 10 | `train C1-sweep-4.0e-4` (e `-1.2e-3`, `-2.4e-3`) | sim | Varredura de LR em 1/16 do S1. Copie o melhor LR no dev para `configs/embed/train/_s1.yaml` | `checkpoints/C1-sweep-*/` |
+| 10 | `train C1-sweep-4.0e-4` (e `-1.2e-3`, `-2.4e-3`) | sim | Varredura de LR em 1/8 do S1 (24 passos). Copie o melhor LR no dev para `configs/embed/train/_s1.yaml` | `checkpoints/C1-sweep-*/` |
 | 11 | `train R1`, `train C1` | sim | Baseline do artigo e estágio S1 | `checkpoints/<ID>/model/` |
 | 12 | `train C2`, `C2-real`, `C2-syn`, `C2-s2`, `C2-s3` | sim | Modelo principal e candidatos do merge | idem |
 | 13 | `train C2-direct`, `C2-nohn`, `C2-naivehn`, `C2-ib`, `C2-full`, `C2-attnonly`, `C2-noinst`, `C2-mrl`, `C3-long` | sim | Ablações A1, A3, A4, A8, A10, A12 e A13 | idem |

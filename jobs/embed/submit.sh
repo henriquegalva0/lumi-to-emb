@@ -38,6 +38,11 @@ case "$STEP" in
   eval)                    hours=12; mem=32g ;;   # pico medido no MTEB-BR/PT: 7,4 GB
   merge)                   hours=6; mem=32g ;;
 esac
+# Suítes grandes: o MTEB eng v2 inclui o MindSmallReranking (2,36 milhões de queries; só carregá-lo
+# usou ~31 GB de RAM no decontam, e os embeddings somam ~30 GB em float32). Mais RAM e tempo.
+if [ "$STEP" = eval ] || [ "$STEP" = baseline ]; then
+  case " $* " in *" eng_v2 "*|*" mmteb "*) mem=128g; hours=24 ;; esac
+fi
 # LUMI_PROFILE=small força a classe menor de GPU (vram 20) numa etapa que normalmente usa a B200.
 # Útil para avaliações (inferência de um modelo de 4B cabe com folga) em paralelo com um treino
 # ou síntese na B200: 179 + 89 GB cabem juntos numa cota de 268 GB.

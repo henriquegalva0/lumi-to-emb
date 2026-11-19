@@ -41,7 +41,8 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **S2: só os 4 negativos difíceis** | Foi a melhor variante de perda em [10]. A alternativa com batch + máscara é a ablação A4 (`C2-ib`) |
 | **LR do S2 com LoRA = 1e-4** (proposta) | O plano fixa só o LR do fine-tuning completo (2e-6) |
 | **R1 com LoRA** (proposta) | O Mamba Retriever fez ajuste completo de modelos até 790M; aqui o modelo tem 4B. Os 63 negativos são os BM25 oficiais do MS MARCO (`triples.train.ids.small.tsv`), sem rodar BM25 de novo |
-| **Varredura de LR do S1** (`C1-sweep-*`: 4e-4, 1,2e-3, 2,4e-3 em 1/16 dos dados) | O plano recomenda varrer LR em Mamba antes do treino completo |
+| **Varredura de LR do S1** (`C1-sweep-*`: 4e-4, 1,2e-3, 2,4e-3 em 1/8 dos dados, 24 passos) | O plano recomenda varrer LR em Mamba antes do treino completo |
+| **Aquecimento proporcional** (`warmup_ratio: 0.1`) em vez de 100 passos fixos | Na escala reduzida, o S1 tem ~195 passos: 100 de aquecimento seriam metade do treino, e na varredura (24 passos) a taxa nunca chegaria ao valor testado |
 | **Checkpoints por tempo e `SIGTERM`** | Os jobs têm `max_time`; reenviar continua do passo salvo |
 | **S0 (MNTP): token de máscara `<unk>`, 30 % mascarado, posição i prevista pelo logit de i − 1** | O tokenizer do Lumi não tem token de máscara. O LLM2Vec usa um token raro, e 30 % fica no meio da faixa 20–40 % do plano. Só os logits das posições mascaradas são calculados |
 

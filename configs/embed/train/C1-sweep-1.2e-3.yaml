@@ -1,5 +1,6 @@
-# Varredura de LR em 1/16 do S1 (seção 3.4): escolher pelo dev e copiar para C1.yaml.
+# Varredura de LR em 1/8 do S1 (seção 3.4): 24 passos, aquecimento de 10 %; escolher pelo dev
+# (mean_ndcg@10 em checkpoints/C1-sweep-*/summary.json) e copiar para _s1.yaml.
 inherit: _s1.yaml
 init: hf:ceia-research/lumi-4b@27b30f40b930fd05cee5e1c1f8790f70fa5b816d
-data: {limit: 25000}
+data: {limit: 50000}
 train: {lr: 1.2e-3, eval_every: 6}

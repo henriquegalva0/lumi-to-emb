@@ -11,7 +11,7 @@ train:
   batch_size: 128
   micro_batch: 16
   epochs: 1
-  warmup_steps: 100
+  warmup_ratio: 0.1                # 10 % dos passos (~94 no S2 de 120 mil exemplos)
   optimizer: {weight_decay: 0.01}
   gradient_checkpointing: true
   save_every_min: 30

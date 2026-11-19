@@ -209,3 +209,14 @@ def test_borda():
            "B": {"tasks": {"r": {"ndcg@10": 0.6}, "s": {"ndcg@10": 0.8}}},
            "C": {"tasks": {"r": {"ndcg@10": 0.4}, "s": {"ndcg@10": 0.7}}}}
     assert borda(res) == {"A": 3.0, "B": 3.0, "C": 0.0}
+
+
+def test_warmup_is_proportional_to_training_length():
+    from lumi_embed.train.contrastive import lr_lambda, warmup_steps
+
+    assert warmup_steps({"warmup_ratio": 0.1}, 195) == 20      # S1 na escala reduzida
+    assert warmup_steps({"warmup_ratio": 0.1}, 24) == 3        # varredura de LR
+    assert warmup_steps({}, 937) == 94                         # padrão 10 %
+    assert warmup_steps({"warmup_steps": 50, "warmup_ratio": 0.1}, 195) == 50  # explícito vence
+    f = lr_lambda(3, 24)
+    assert f(2) == 1.0 and f(0) < f(1) < f(2)                   # a taxa chega ao valor testado
