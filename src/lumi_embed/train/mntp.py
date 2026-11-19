@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from ..modeling.bidir import apply_direction, build_masks
 from ..modeling.embedder import EmbedSpec, LumiEmbedder, prepare_tokenizer
 from ..modeling.export import save_embedder
+from ..modeling.kernels import ensure_hub_kernels
 from ..utils import EmbedError, ckpt_dir, iter_jsonl, run_metadata, seed_everything, write_json
 from .contrastive import DEFAULT_LORA_TARGETS, lr_lambda, resolve_data, resolve_init
 
@@ -62,9 +63,10 @@ def train_mntp(cfg: dict, ckpt_id: str, max_minutes: float | None = None):
     path, rev = resolve_init(cfg["init"])
     kwargs = {"revision": rev, "dtype": torch.bfloat16,
               "attn_implementation": cfg.get("model", {}).get("attn_implementation", "sdpa")}
-    if cfg.get("model", {}).get("use_hub_kernels", True) and device.type == "cuda":
-        kwargs["use_kernels"] = True
     lm = AutoModelForCausalLM.from_pretrained(path, **kwargs).to(device)
+    kernel_info = None
+    if cfg.get("model", {}).get("use_hub_kernels", True) and device.type == "cuda":
+        kernel_info = ensure_hub_kernels(lm, lm.model)
     tok = prepare_tokenizer(AutoTokenizer.from_pretrained(path, revision=rev), spec)
     apply_direction(lm.model, spec.direction)
     mask_id = tok.convert_tokens_to_ids(mcfg.get("mask_token", "<unk>"))
@@ -120,7 +122,7 @@ def train_mntp(cfg: dict, ckpt_id: str, max_minutes: float | None = None):
             raise EmbedError("Tempo esgotado no MNTP (estágio curto, sem retomada): aumente max_time ou reduza max_steps.")
     merged = lm.merge_and_unload()
     model = LumiEmbedder(merged.model, tok, spec)
-    meta = run_metadata(cfg, ckpt_id=ckpt_id, seed=seed, steps=total,
+    meta = run_metadata(cfg, ckpt_id=ckpt_id, seed=seed, steps=total, hub_kernels=kernel_info,
                         final_loss=float(sum(history[-20:]) / max(1, len(history[-20:]))),
                         minutes=round((time.time() - t0) / 60, 1))
     save_embedder(model, out / "model", meta=meta)

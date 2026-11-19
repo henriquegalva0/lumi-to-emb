@@ -280,6 +280,7 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
     model.eval()
     dev_metrics = dev_eval_fn(model, dev) if dev is not None else None
     meta = run_metadata(cfg, ckpt_id=ckpt_id, seed=seed, steps=step, epochs_done=step / steps_per_epoch,
+                        hub_kernels=model.kernel_info,
                         n_train=len(data), dev=dev_metrics,
                         train_minutes=round((time.time() - t_start) / 60, 1))
     save_embedder(model, out / "model", meta=meta)

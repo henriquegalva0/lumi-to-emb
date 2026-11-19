@@ -78,7 +78,7 @@ Com uma cota de 268 GB, cabe um job de cada perfil ao mesmo tempo. Por exemplo, 
 
 ## Antes de treinar: confira
 
-1. `results/embed/bench.json` deve mostrar que `hub_kernels` é bem mais rápido que `torch_fallback`. Se não for, os kernels não carregaram (veja o log do `check`).
+1. `results/embed/bench.json`: `hub_kernels.kernel_check.active` deve ser `true` (o scan Mamba-2 em PyTorch puro não roda nem em inferência nem em treino) e `speedup_hub_vs_torch` deve ser bem maior que 1. A fase `torch_fallback` usa lote 4 (o caminho PyTorch puro não cabe com 32 × 512 no backward). Sem os kernels, qualquer carregamento na GPU falha com uma mensagem explícita; `LUMI_ALLOW_TORCH_MAMBA=1` permite seguir assim mesmo.
 2. `checkpoints/R0/verify.json` com T1–T4 `ok`.
 3. `results/embed/contamination/report.md`: quantos exemplos saíram por sobreposição com a avaliação.
 4. `data/embed/mined/stats.json` (exemplos descartados pelo filtro de cosseno e pelo de posição do positivo) e `data/embed/sets/manifest.json` (tamanho realizado de cada componente).

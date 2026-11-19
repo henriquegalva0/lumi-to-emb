@@ -109,3 +109,39 @@ def test_T4_roundtrip_lumi_and_sentence_transformers(tiny_dir, tmp_path):
     q = st.encode(["o que é inflação?"], prompt_name="query", convert_to_tensor=True).cpu()
     ours = again.encode(["o que é inflação?"], instruction="Dada uma pergunta, recupere passagens que a respondam")
     assert F.cosine_similarity(q.float(), ours, dim=-1).item() >= 0.9999
+
+
+def test_kernel_probe_counts_torch_scan_and_fails_loudly(tiny_dir, monkeypatch):
+    # Na CPU não há kernels Mamba-2: o scan em PyTorch puro roda em inferência e em treino, e a
+    # verificação tem de falhar (em vez de seguir em silêncio), salvo com LUMI_ALLOW_TORCH_MAMBA=1.
+    from lumi_embed.modeling import kernels
+    from lumi_embed.utils import EmbedError
+
+    m = load(tiny_dir)
+    m.backbone.train(False)
+    probe = kernels.probe_mamba_path(m.backbone, seq_len=16)
+    assert probe["torch_scan_calls_eval"] > 0 and probe["torch_scan_calls_train"] > 0
+    assert m.backbone.training is False  # modo original restaurado
+    import transformers.models.nemotron_h.modeling_nemotron_h as mh
+    assert mh.segment_sum.__name__ == "segment_sum"  # função original restaurada
+
+    monkeypatch.setattr(kernels, "enable_hub_kernels", lambda model: None)
+    monkeypatch.delenv(kernels.ALLOW_ENV, raising=False)
+    with pytest.raises(EmbedError, match="inativos"):
+        kernels.ensure_hub_kernels(m.backbone)
+    monkeypatch.setenv(kernels.ALLOW_ENV, "1")
+    res = kernels.ensure_hub_kernels(m.backbone)
+    assert res["active"] is False and res["torch_scan_calls_train"] > 0
+
+    def broken(model):
+        raise ImportError("Kernel module `mamba_ssm` requires Python dependency `einops`")
+
+    monkeypatch.setattr(kernels, "enable_hub_kernels", broken)
+    res = kernels.ensure_hub_kernels(m.backbone)
+    assert "einops" in res["problem"]
+
+
+def test_cpu_load_skips_hub_kernels(tiny_dir):
+    # Na CPU (testes, exportação) a verificação não roda e o modelo registra que não usou kernels.
+    m = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, device="cpu")
+    assert m.kernel_info is None

@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .bidir import apply_direction, build_masks
+from .kernels import ensure_hub_kernels
 
 log = logging.getLogger("lumi_embed.model")
 
@@ -82,6 +83,7 @@ class LumiEmbedder(nn.Module):
         self.backbone = backbone
         self.tokenizer = tokenizer
         self.spec = spec
+        self.kernel_info: dict | None = None  # resultado de ensure_hub_kernels (metadados)
         apply_direction(self.backbone, spec.direction)
 
     # ------------------------------------------------------------------ carga
@@ -105,21 +107,19 @@ class LumiEmbedder(nn.Module):
             saved_spec = json.loads((local / SPEC_FILE).read_text())
         if isinstance(spec, dict) or spec is None:
             spec = EmbedSpec.from_dict({**(saved_spec or {}), **(spec or {})})
-        kwargs = {"revision": revision, "dtype": dtype, "attn_implementation": attn_implementation}
-        if use_hub_kernels and torch.cuda.is_available():
-            kwargs["use_kernels"] = True
-        try:
-            backbone = AutoModel.from_pretrained(path_or_id, **kwargs)
-        except Exception as exc:  # noqa: BLE001 - sem kernels do Hub: cai no caminho PyTorch puro
-            if not kwargs.pop("use_kernels", False):
-                raise
-            log.warning("Kernels do Hub indisponíveis (%s); usando o caminho PyTorch puro.", exc)
-            backbone = AutoModel.from_pretrained(path_or_id, **kwargs)
+        backbone = AutoModel.from_pretrained(path_or_id, revision=revision, dtype=dtype,
+                                             attn_implementation=attn_implementation)
+        if device is not None:
+            backbone.to(device)
+        # Kernels do Hub só depois de o modelo estar no dispositivo final, com verificação explícita
+        # (ver modeling/kernels.py): sem eles, falha em vez de cair em silêncio no PyTorch puro.
+        kernel_info = None
+        if use_hub_kernels and next(backbone.parameters()).device.type == "cuda":
+            kernel_info = ensure_hub_kernels(backbone)
         tok = AutoTokenizer.from_pretrained(path_or_id, revision=revision)
         prepare_tokenizer(tok, spec)
         model = cls(backbone, tok, spec)
-        if device is not None:
-            model.to(device)
+        model.kernel_info = kernel_info
         return model
 
     # ------------------------------------------------------------------ propriedades

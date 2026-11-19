@@ -111,32 +111,56 @@ def verify_checkpoint(ckpt_id: str) -> dict:
     return res
 
 
-def bench(cfg: dict, seq_len: int = 512, batch: int = 32) -> dict:
-    """Throughput de forward/backward no backbone real, com e sem kernels do Hub."""
+def bench(cfg: dict, seq_len: int = 512, batch: int = 32, fallback_batch: int = 4) -> dict:
+    """Vazão de forward/backward no backbone real, com e sem kernels do Hub.
+
+    A fase com kernels verifica antes que o Mamba-2 não usa o caminho PyTorch puro (falha se usar).
+    A fase sem kernels usa um lote menor: o scan em PyTorch puro guarda tensores de tamanho
+    lote × cabeças × blocos × 128² por camada para o backward e não cabe com 32 × 512 tokens.
+    A comparação é por token; um OOM vira resultado em vez de derrubar o job.
+    """
+    import gc
     import time
 
     m = cfg["model"]
     out = {}
-    for kernels in (True, False):
-        model = LumiEmbedder.from_pretrained(m["hf_id"], revision=m["revision"], use_hub_kernels=kernels,
-                                             device="cuda")
-        ids = torch.randint(100, 50000, (batch, seq_len), device="cuda")
-        mask = torch.ones_like(ids)
-        model.train()
-        with torch.enable_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
-            for _ in range(2):
-                model(ids, mask).sum().backward()
-            torch.cuda.synchronize()
-            t0 = time.time()
-            for _ in range(5):
-                model(ids, mask).sum().backward()
-            torch.cuda.synchronize()
-        dt = (time.time() - t0) / 5
-        out["hub_kernels" if kernels else "torch_fallback"] = {
-            "tokens_per_s_fwd_bwd": round(batch * seq_len / dt), "sec_per_step": round(dt, 3),
-            "peak_mem_gb": round(torch.cuda.max_memory_allocated() / 1e9, 1)}
-        del model
+    for name, kernels, b in (("hub_kernels", True, batch), ("torch_fallback", False, fallback_batch)):
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
+        res = {"batch": b, "seq_len": seq_len}
+        model = None
+        try:
+            model = LumiEmbedder.from_pretrained(m["hf_id"], revision=m["revision"], use_hub_kernels=kernels,
+                                                 device="cuda")
+            if kernels:
+                res["kernel_check"] = model.kernel_info
+            ids = torch.randint(100, 50000, (b, seq_len), device="cuda")
+            mask = torch.ones_like(ids)
+            model.train()
+            with torch.enable_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                for _ in range(2):
+                    model(ids, mask).sum().backward()
+                torch.cuda.synchronize()
+                t0 = time.time()
+                for _ in range(5):
+                    model(ids, mask).sum().backward()
+                torch.cuda.synchronize()
+            dt = (time.time() - t0) / 5
+            res.update(tokens_per_s_fwd_bwd=round(b * seq_len / dt), sec_per_step=round(dt, 3),
+                       peak_mem_gb=round(torch.cuda.max_memory_allocated() / 1e9, 1))
+        except torch.OutOfMemoryError as exc:
+            res.update(error="OOM", peak_mem_gb=round(torch.cuda.max_memory_allocated() / 1e9, 1),
+                       detail=str(exc).split(".")[0])
+        finally:
+            if model is not None:
+                model.zero_grad(set_to_none=True)
+            del model
+            gc.collect()
+            torch.cuda.empty_cache()
+        out[name] = res
+        log.info("bench %s: %s", name, res)
+    hk, tf = out["hub_kernels"], out["torch_fallback"]
+    if "tokens_per_s_fwd_bwd" in hk and "tokens_per_s_fwd_bwd" in tf:
+        out["speedup_hub_vs_torch"] = round(hk["tokens_per_s_fwd_bwd"] / tf["tokens_per_s_fwd_bwd"], 2)
     log.info("bench: %s", out)
     return out
