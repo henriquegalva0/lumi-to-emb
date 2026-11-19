@@ -71,3 +71,21 @@ def test_instruction_resolution():
     assert resolve_instruction(inst, "AssinSTS", "STS", None) == "S"
     assert resolve_instruction(inst, "HateBR", "Classification", None) == "H"
     assert resolve_instruction(inst, "X", "Clustering", None) == "D"
+
+
+def test_same_max_length_for_every_model():
+    # Protocolo: o comprimento vem da suíte ou de eval.max_length, nunca do modelo (um baseline de 32k
+    # codificava documentos inteiros enquanto o nosso corta em 512, e estourava a memória).
+    import types
+
+    from lumi_embed.eval.run import cap_length, suite_params
+    from lumi_embed.utils import load_config
+
+    ecfg = load_config("eval.yaml")["eval"]
+    assert suite_params(ecfg, "mteb_pt") == (512, ecfg["batch_size"])
+    assert suite_params(ecfg, "mteb_pt", model_batch=64) == (512, 64)
+    assert suite_params(ecfg, "longembed", model_batch=64) == (32768, 1)  # lote da suíte limita
+
+    st = types.SimpleNamespace(max_seq_length=32768)
+    assert cap_length(types.SimpleNamespace(model=st), 512) and st.max_seq_length == 512
+    assert not cap_length(types.SimpleNamespace(model=object()), 512)

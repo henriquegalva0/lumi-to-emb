@@ -3,6 +3,8 @@
 # comprimento máximo.
 eval:
   batch_size: 32
+  max_length: 512                  # comprimento máximo de TODOS os modelos (checkpoints e baselines),
+                                   # salvo quando a suíte define outro (LongEmbed: 32768)
   raise_error: false
   suites:
     smoke:                         # T6: 2 tarefas do MTEB-BR + 2 do MTEB-PT

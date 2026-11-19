@@ -50,6 +50,30 @@ def checkpoint_path(ckpt_id: str) -> str:
     return str(path)
 
 
+def suite_params(ecfg: dict, suite: str, model_batch: int | None = None) -> tuple[int, int]:
+    """(comprimento máximo, lote) de uma suíte, iguais para todos os modelos.
+
+    O comprimento vem da suíte (ex.: LongEmbed) ou do protocolo (`eval.max_length`), nunca do modelo:
+    sem isso, um baseline com contexto de 32k codificaria documentos inteiros enquanto o nosso corta
+    em 512. O lote é o do modelo, limitado pelo da suíte quando ela define um (ex.: 1 no LongEmbed).
+    """
+    s = ecfg["suites"][suite]
+    max_len = int(s.get("max_length") or ecfg.get("max_length", 512))
+    bs = int(model_batch or ecfg["batch_size"])
+    if s.get("batch_size"):
+        bs = min(bs, int(s["batch_size"]))
+    return max_len, bs
+
+
+def cap_length(model, max_len: int) -> bool:
+    """Limita o comprimento de um encoder do mteb baseado em Sentence-Transformers."""
+    st = getattr(model, "model", None)
+    if st is not None and hasattr(st, "max_seq_length"):
+        st.max_seq_length = max_len
+        return True
+    return False
+
+
 def evaluate_checkpoint(cfg: dict, ckpt_id: str, suites: list[str]) -> dict:
     import mteb
     from mteb.cache import ResultCache
@@ -60,19 +84,19 @@ def evaluate_checkpoint(cfg: dict, ckpt_id: str, suites: list[str]) -> dict:
     cache = ResultCache(results_dir("mteb"))
     summary = {}
     for suite in suites:
-        s = ecfg["suites"][suite]
+        max_len, bs = suite_params(ecfg, suite)
         enc = build_encoder(checkpoint_path(ckpt_id), model_name(ckpt_id), git_commit()["commit"][:12],
-                            ecfg["instructions"], batch_size=int(s.get("batch_size", ecfg["batch_size"])),
-                            max_length=s.get("max_length"), spec_overrides=spec_override_for(ckpt_id))
+                            ecfg["instructions"], batch_size=bs, max_length=max_len,
+                            spec_overrides=spec_override_for(ckpt_id))
         tasks = suite_tasks(ecfg, suite)
         write_json(results_dir("suites", f"{suite}.json"), [t.metadata.name for t in tasks])
         log.info("Avaliando %s em %s (%d tarefas)", ckpt_id, suite, len(tasks))
         t0 = time.time()
         mteb.evaluate(enc, tasks, cache=cache, overwrite_strategy="only-missing", show_progress_bar=False,
-                      raise_error=bool(ecfg.get("raise_error", False)),
-                      encode_kwargs={"batch_size": int(s.get("batch_size", ecfg["batch_size"]))})
+                      raise_error=bool(ecfg.get("raise_error", False)), encode_kwargs={"batch_size": bs})
         enc.save_instructions()
-        summary[suite] = {"tasks": len(tasks), "minutes": round((time.time() - t0) / 60, 1)}
+        summary[suite] = {"tasks": len(tasks), "max_length": max_len, "batch_size": bs,
+                          "minutes": round((time.time() - t0) / 60, 1)}
         del enc
         _free()
     write_json(results_dir("runs", f"{ckpt_id}.json"), summary)
@@ -90,6 +114,7 @@ def evaluate_baseline(cfg: dict, hf_id: str, suites: list[str]) -> dict:
     summary = {}
     for suite in suites:
         tasks = suite_tasks(ecfg, suite)
+        max_len, bs = suite_params(ecfg, suite, bcfg.get("batch_size"))
         if bcfg.get("instruct_template"):
             from mteb.models.instruct_wrapper import InstructSentenceTransformerModel
 
@@ -97,16 +122,20 @@ def evaluate_baseline(cfg: dict, hf_id: str, suites: list[str]) -> dict:
             model = InstructSentenceTransformerModel(
                 hf_id, revision=bcfg.get("revision"), instruction_template=bcfg["instruct_template"],
                 apply_instruction_to_passages=False, prompts_dict=prompts,
-                model_kwargs={"dtype": "bfloat16"}, max_seq_length=bcfg.get("max_length"),
+                model_kwargs={"dtype": "bfloat16"}, max_seq_length=max_len,
             )
             model.mteb_model_meta = mteb.get_model_meta(hf_id)
         else:
             model = mteb.get_model(hf_id, revision=bcfg.get("revision"))
+        if not cap_length(model, max_len):
+            raise EmbedError(f"Não foi possível limitar {hf_id} a {max_len} tokens (protocolo: mesmo comprimento "
+                             "para todos os modelos). Adapte cap_length() ao wrapper deste modelo.")
+        log.info("Baseline %s em %s: max_length %d, lote %d", hf_id, suite, max_len, bs)
         t0 = time.time()
         mteb.evaluate(model, tasks, cache=cache, overwrite_strategy="only-missing", show_progress_bar=False,
-                      raise_error=bool(ecfg.get("raise_error", False)),
-                      encode_kwargs={"batch_size": int(bcfg.get("batch_size", ecfg["batch_size"]))})
-        summary[suite] = {"tasks": len(tasks), "minutes": round((time.time() - t0) / 60, 1)}
+                      raise_error=bool(ecfg.get("raise_error", False)), encode_kwargs={"batch_size": bs})
+        summary[suite] = {"tasks": len(tasks), "max_length": max_len, "batch_size": bs,
+                          "minutes": round((time.time() - t0) / 60, 1)}
         del model
         _free()
     write_json(results_dir("runs", f"baseline__{hf_id.replace('/', '__')}.json"), summary)
