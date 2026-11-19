@@ -180,3 +180,25 @@ def test_mix_builds_disjoint_sets_and_ablations(data_cfg, tmp_path):
     assert len(r1) == 5 and all(len(r["negatives"]) == 63 for r in r1)
     longs = load("long")
     assert all(r["source"].get("long") for r in longs)
+
+
+def test_mmarco_samples_only_queries_with_triples(data_cfg, tmp_path, monkeypatch):
+    # Regressão: as queries eram sorteadas entre todas as de treino, mas só as que estão nos trios
+    # oficiais têm positivo; metade das escolhidas sumia.
+    from lumi_embed.data import sources
+
+    d = tmp_path / "mm"
+    d.mkdir()
+    (d / "q.tsv").write_text("".join(f"{i}\tpergunta número {i}?\n" for i in range(20)))
+    (d / "t.tsv").write_text("".join(f"{i}\t{100 + i}\t{200 + i * 10 + k}\n" for i in range(0, 20, 2) for k in range(5)))
+    pids = [100 + i for i in range(0, 20, 2)] + [200 + i * 10 + k for i in range(0, 20, 2) for k in range(5)]
+    (d / "c.tsv").write_text("".join(f"{p}\tpassagem {p} sobre o assunto.\n" for p in pids))
+    files = {"Q": d / "q.tsv", "T": d / "t.tsv", "C": d / "c.tsv"}
+    monkeypatch.setattr(sources, "download", lambda repo, rev, path: str(files[path]))
+    data_cfg["sources"]["mmarco"].update(queries="Q", triples="T", collection="C", n_queries=6, r1_queries=2,
+                                         r1_negatives=4, other_negatives=1)
+    stats = sources.mmarco_pt(data_cfg, seed=1)
+    assert stats == {"mmarco_pt": 6, "r1_queries": 2}
+    rows = [json.loads(x) for x in (tmp_path / "data/embed/raw/mmarco_pt.jsonl").read_text().splitlines()]
+    assert all(int(r["source"]["qid"]) % 2 == 0 for r in rows)
+    assert sorted(len(r["bm25_negatives"]) for r in rows) == [1, 1, 1, 1, 4, 4]

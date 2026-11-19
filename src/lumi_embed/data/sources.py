@@ -122,7 +122,11 @@ def mmarco_pt(cfg: dict, seed: int) -> dict:
     t_path = download(src["repo"], src["revision"], src["triples"])
     c_path = download(src["repo"], src["revision"], src["collection"])
     queries = {qid: text for qid, text in _read_tsv(q_path)}
-    qids = sorted(queries)
+    # Só ~metade das queries de treino aparece nos trios oficiais (positivo + negativos BM25);
+    # sorteamos entre elas, senão metade das escolhidas ficaria sem positivo.
+    in_triples = {parts[0] for parts in _read_tsv(t_path, cols=3)}
+    qids = sorted(q for q in queries if q in in_triples)
+    log.info("mMARCO: %d queries de treino, %d com trios BM25", len(queries), len(qids))
     rng.shuffle(qids)
     chosen = qids[: int(src["n_queries"])]
     r1 = set(chosen[: int(src["r1_queries"])])
