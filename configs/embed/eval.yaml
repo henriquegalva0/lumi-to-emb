@@ -46,5 +46,8 @@ eval:
       revision: 274baa43b0e13e37fafa6428dbc7938e62e5c439
       instruct_template: "Instruct: {instruction}\nQuery: "
       batch_size: 64
+    # gte-multilingual-base: o código remoto (arquitetura NewModel, escrito para o transformers 4.x) dispara
+    # "CUDA error: device-side assert" em todas as tarefas com o transformers 5.23. Medição pendente num
+    # ambiente com transformers 4.x; a Tabela 14 mantém os valores publicados [17].
     Alibaba-NLP/gte-multilingual-base: {batch_size: 64}
     nvidia/llama-embed-nemotron-8b: {batch_size: 16}
