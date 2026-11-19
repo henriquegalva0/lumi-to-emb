@@ -337,3 +337,50 @@ def test_run_decontaminate_drops_spun_examples_and_negatives(data_cfg, tmp_path,
     kept = [json.loads(x) for x in (tmp_path / "data/embed/clean/t.jsonl").read_text().splitlines()]
     assert [n["text"] for n in kept[0]["negatives"]] == ["Rio de Janeiro foi capital."]
     assert "spinado" in (tmp_path / "results/embed/contamination/report.md").read_text()
+
+
+def test_eval_index_is_saved_per_task_and_resumes(data_cfg, tmp_path, monkeypatch):
+    # O índice de avaliação é salvo tarefa a tarefa: um job que morre no meio continua de onde parou.
+    import types
+
+    from lumi_embed.data import decontaminate as dc
+
+    loads = []
+
+    def task(name, texts):
+        t = types.SimpleNamespace(metadata=types.SimpleNamespace(name=name), dataset=None)
+
+        def load_data():
+            loads.append(name)
+            t.dataset = {"test": {"corpus": texts}}
+
+        t.load_data = load_data
+        return t
+
+    long_txt = " ".join(f"palavra{i}" for i in range(40))
+    tasks = [task("A", [long_txt, "curto"]), task("B", [long_txt + " extra"]), task("Grande", [long_txt + " x"])]
+    monkeypatch.setattr(dc, "eval_tasks", lambda benchmarks: tasks)
+    data_cfg["decontamination"]["skip_tasks"] = ["Grande"]
+    idx = dc.build_index(data_cfg)
+    assert loads == ["A", "B"] and idx["meta"]["tasks"]["Grande"].startswith("excluída")
+    assert idx["meta"]["tasks"]["A"] == 1 and len(idx["texts"]) == 2 and len(idx["ngrams"]) > 0
+    # simula um job que morreu depois de indexar A e B: o índice final some, as tarefas ficam
+    (tmp_path / "data/embed/decontam/eval_index.npz").unlink()
+    loads.clear()
+    idx2 = dc.build_index(data_cfg)
+    assert loads == [] and (idx2["ngrams"] == idx["ngrams"]).all()
+
+
+def test_eval_index_key_compatible_with_previous_runs(data_cfg, tmp_path, monkeypatch):
+    # Um índice gravado antes da opção skip_tasks (chave sem ela) continua sendo reaproveitado.
+    from lumi_embed.data import decontaminate as dc
+
+    d = tmp_path / "data/embed/decontam"
+    d.mkdir(parents=True)
+    dc_cfg = data_cfg["decontamination"]
+    np.savez(d / "eval_index.npz", ngrams=np.array([1, 2], dtype=np.uint64), texts=np.array([3], dtype=np.uint64))
+    (d / "eval_index.json").write_text(json.dumps({"key": {k: dc_cfg[k] for k in ("benchmarks", "ngram", "stride")},
+                                                   "tasks": {}, "n_ngrams": 2, "n_texts": 1}))
+    monkeypatch.setattr(dc, "eval_tasks", lambda b: (_ for _ in ()).throw(AssertionError("não devia reindexar")))
+    dc_cfg["skip_tasks"] = []
+    assert list(dc.build_index(data_cfg)["ngrams"]) == [1, 2]

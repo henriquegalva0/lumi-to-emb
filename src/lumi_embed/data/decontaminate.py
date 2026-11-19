@@ -109,42 +109,75 @@ def eval_tasks(benchmarks: list[str]):
     return tasks
 
 
+def _index_task(task, hasher: "Hasher", n: int, stride: int) -> tuple[np.ndarray, np.ndarray, int]:
+    """Hashes dos textos e dos n-gramas de uma tarefa de avaliação."""
+    name = task.metadata.name
+    try:
+        task.load_data()
+    except Exception as exc:  # noqa: BLE001
+        raise EmbedError(f"Não foi possível carregar a tarefa de avaliação {name}: {exc}") from exc
+    texts, grams, count = [], [], 0
+    for s in _iter_strings(task.dataset):
+        if len(s) < 20:
+            continue
+        texts.append(Hasher.text_hash(s))
+        g = hasher.ngrams(s, n, stride)
+        if len(g):
+            grams.append(g)
+        count += 1
+    if hasattr(task, "unload_data"):
+        task.unload_data()
+    tx = np.unique(np.array(texts, dtype=np.uint64))
+    ng = np.unique(np.concatenate(grams)) if grams else np.empty(0, dtype=np.uint64)
+    return tx, ng, count
+
+
 def build_index(cfg: dict) -> dict:
-    """Constrói (ou reaproveita) o índice de n-gramas dos textos de avaliação."""
+    """Constrói (ou reaproveita) o índice de n-gramas dos textos de avaliação.
+
+    Cada tarefa é salva assim que indexada (data/embed/decontam/tasks_n<N>_s<S>/<tarefa>.npz): se o job
+    morrer no meio (memória, tempo), o reenvio continua de onde parou. `skip_tasks` exclui tarefas do
+    índice (desvio da política; registre o motivo na ficha dos dados).
+    """
     dcfg = cfg["decontamination"]
     out_dir = data_dir("decontam")
     idx_file = out_dir / "eval_index.npz"
     meta_file = out_dir / "eval_index.json"
+    skip = sorted(dcfg.get("skip_tasks") or [])
     key = {k: dcfg[k] for k in ("benchmarks", "ngram", "stride")}
+    if skip:  # só entra na chave quando usada: índices montados antes desta opção continuam válidos
+        key["skip_tasks"] = skip
     if idx_file.exists() and meta_file.exists() and json.loads(meta_file.read_text()).get("key") == key:
         z = np.load(idx_file)
         return {"ngrams": z["ngrams"], "texts": z["texts"], "meta": json.loads(meta_file.read_text())}
     hasher = Hasher()
     n, stride = int(dcfg["ngram"]), int(dcfg["stride"])
+    task_dir = out_dir / f"tasks_n{n}_s{stride}"
+    task_dir.mkdir(parents=True, exist_ok=True)
     grams, texts, per_task = [], [], {}
     t0 = time.time()
     for task in eval_tasks(dcfg["benchmarks"]):
         name = task.metadata.name
-        try:
-            task.load_data()
-        except Exception as exc:  # noqa: BLE001
-            raise EmbedError(f"Não foi possível carregar a tarefa de avaliação {name}: {exc}") from exc
-        count = 0
-        for s in _iter_strings(task.dataset):
-            if len(s) < 20:
-                continue
-            texts.append(Hasher.text_hash(s))
-            g = hasher.ngrams(s, n, stride)
-            if len(g):
-                grams.append(g)
-            count += 1
+        if name in skip:
+            per_task[name] = "excluída (skip_tasks)"
+            log.warning("  %s: excluída do índice (decontamination.skip_tasks)", name)
+            continue
+        f = task_dir / f"{name}.npz"
+        if f.exists():
+            z = np.load(f)
+            tx, ng, count = z["texts"], z["ngrams"], int(z["count"])
+            log.info("  %s: %d textos (índice salvo)", name, count)
+        else:
+            tx, ng, count = _index_task(task, hasher, n, stride)
+            tmp = task_dir / f"{name}.tmp.npz"
+            np.savez(tmp, texts=tx, ngrams=ng, count=np.array(count))
+            tmp.replace(f)
+            log.info("  %s: %d textos", name, count)
+        texts.append(tx)
+        grams.append(ng)
         per_task[name] = count
-        log.info("  %s: %d textos", name, count)
-        if hasattr(task, "unload_data"):
-            task.unload_data()
     ng = np.unique(np.concatenate(grams)) if grams else np.empty(0, dtype=np.uint64)
-    tx = np.unique(np.array(texts, dtype=np.uint64))
-    out_dir.mkdir(parents=True, exist_ok=True)
+    tx = np.unique(np.concatenate(texts)) if texts else np.empty(0, dtype=np.uint64)
     np.savez(idx_file, ngrams=ng, texts=tx)
     meta = {"key": key, "tasks": per_task, "n_ngrams": int(len(ng)), "n_texts": int(len(tx)),
             "seconds": round(time.time() - t0, 1)}
