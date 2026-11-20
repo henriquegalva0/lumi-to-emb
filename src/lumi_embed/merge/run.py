@@ -13,8 +13,8 @@ import json
 import logging
 import shutil
 
-from ..eval.dev import borda, dev_eval
-from ..utils import EmbedError, ckpt_dir, data_dir, iter_jsonl, run_metadata, write_json
+from ..eval.dev import borda, dev_eval, load_dev_set
+from ..utils import EmbedError, ckpt_dir, data_dir, run_metadata, write_json
 from . import merge as mg
 
 log = logging.getLogger("lumi_embed.merge")
@@ -49,7 +49,7 @@ def run_merge_grid(cfg: dict) -> dict:
             vid = f"{name}-base{lam}"
             variants[vid] = mg.base_interp(_model(anchor), ckpt_dir(f"{name}-avg") / "model", float(lam),
                                            ckpt_dir(vid) / "model", recipe={"anchor": anchor, "of": f"{name}-avg"})
-    dev_rows = list(iter_jsonl(data_dir(cfg["dev"])))
+    dev_rows = load_dev_set(data_dir(cfg["dev"]))
     scored = {}
     for vid, path in {**{c: p for c, p in paths.items()}, **variants}.items():
         m = LumiEmbedder.from_pretrained(str(path), device="cuda" if torch.cuda.is_available() else "cpu")

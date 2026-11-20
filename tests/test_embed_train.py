@@ -220,3 +220,29 @@ def test_warmup_is_proportional_to_training_length():
     assert warmup_steps({"warmup_steps": 50, "warmup_ratio": 0.1}, 195) == 50  # explícito vence
     f = lr_lambda(3, 24)
     assert f(2) == 1.0 and f(0) < f(1) < f(2)                   # a taxa chega ao valor testado
+
+
+def test_dev_distractors_fixed_and_enlarge_the_pool(tiny_dir, tmp_path):
+    # O dev ganha distratores fixos (positivos do treino, nunca do dev), determinísticos e por tarefa.
+    from lumi_embed.eval.dev import DISTRACTORS_FILE, dev_distractors, load_dev_set
+
+    sets = tmp_path / "sets"
+    train = _write_set(sets / "S1" / "train.jsonl", 60, seed=1)
+    _write_set(sets / "S2" / "train.jsonl", 30, seed=2)
+    dev_rows = _write_set(sets / "S1" / "dev.jsonl", 9, seed=5)
+    # um positivo do dev também aparece no treino: não pode virar distrator
+    (sets / "S1" / "train.jsonl").write_text((sets / "S1" / "train.jsonl").read_text()
+                                             + json.dumps({**train[0], "id": "dup", "positive": dev_rows[0]["positive"]}) + "\n")
+    d = dev_distractors(sets, {"retrieval": 15, "sts": 5})
+    assert len(d["retrieval"]) == 15 and len(d["sts"]) == 5
+    assert dev_rows[0]["positive"] not in d["retrieval"] + d["sts"]
+    first = (sets / DISTRACTORS_FILE).read_text()
+    (sets / DISTRACTORS_FILE).unlink()
+    dev_distractors(sets, {"retrieval": 15, "sts": 5})
+    assert (sets / DISTRACTORS_FILE).read_text() == first          # determinístico
+
+    m = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, use_hub_kernels=False)
+    plain = dev_eval(m, dev_rows)
+    hard = dev_eval(m, load_dev_set(sets / "S1" / "dev.jsonl"))
+    for task in plain["tasks"]:
+        assert hard["tasks"][task]["pool"] > plain["tasks"][task]["pool"]

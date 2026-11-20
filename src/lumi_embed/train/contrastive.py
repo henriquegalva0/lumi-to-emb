@@ -201,7 +201,12 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
     dev = None
     if cfg["data"].get("dev") and dev_eval_fn is not None:
         devp = resolve_data(cfg["data"]["dev"])
-        dev = load_examples(devp) if devp.exists() else None
+        if devp.exists():
+            from ..eval.dev import load_dev_set
+
+            dev = load_dev_set(devp)
+            log.info("dev: %d exemplos + distratores %s", len(dev.rows),
+                     {t: len(v) for t, v in dev.distractors.items()})
     spec = EmbedSpec.from_dict(cfg.get("embedding", {}))
     loss_cfg = LossConfig.from_dict(cfg.get("loss", {}))
     k_neg = int(cfg["data"].get("negatives_per_example", 1))

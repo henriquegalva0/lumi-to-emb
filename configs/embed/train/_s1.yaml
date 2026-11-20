@@ -7,7 +7,7 @@ train:
   stage: s1
   method: lora                     # D3 / A10
   lora: {r: 16, alpha: 16, dropout: 0.0}
-  lr: 4.0e-4                       # varrer até 2,4e-3 (C1-sweep-*): Mamba pode pedir LR maior
+  lr: 2.4e-3                       # escolhido na varredura C1-sweep-* (dev nDCG@10: 4e-4 0,942; 1,2e-3 0,974; 2,4e-3 0,981)
   batch_size: 2048
   micro_batch: 64
   epochs: 1
