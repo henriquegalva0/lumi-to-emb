@@ -432,3 +432,22 @@ def test_cached_near_dup_matches_reference_and_selection_is_unchanged():
         ref_naive = [{"text": t, "score": round(s, 4)} for t, s in ref_clean][:4]
         assert select_negatives(cands, pos, ps, 4, 0.95, dup=dup) == (ref_perc, ref_naive)
         assert select_negatives(cands, pos, ps, 4, 0.95) == (ref_perc, ref_naive)
+
+
+def test_exit_now_flushes_logs_and_output(tmp_path):
+    # Etapas com vLLM saem por os._exit (a desmontagem do motor aborta): nada pode se perder.
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    code = ("import logging, sys; from lumi_embed.cli import _exit_now; from lumi_embed.utils import setup_logging; "
+            "from pathlib import Path; setup_logging(Path(sys.argv[1])); "
+            "logging.getLogger('lumi_embed.t').info('gravado no log'); "
+            "print('saida padrao'); _exit_now(0)")
+    log = tmp_path / "x.log"
+    r = subprocess.run([sys.executable, "-c", code, str(log)], capture_output=True, text=True,
+                       env={**os.environ, "PYTHONPATH": src})
+    assert r.returncode == 0, r.stderr
+    assert "saida padrao" in r.stdout and "gravado no log" in log.read_text()

@@ -144,4 +144,21 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         log.error("Erro inesperado:\n%s", traceback.format_exc())
         return 1
+    if args.cmd == "data" and args.step in VLLM_STEPS:
+        _exit_now(0)
     return 0
+
+
+# Etapas que sobem um motor do vLLM. Ao encerrar o processo, a desmontagem do motor de embeddings
+# aborta ("terminate called without an active exception", core dump) DEPOIS de tudo gravado, e o job
+# aparece como falho. Com o trabalho concluído e os logs gravados, o processo sai direto.
+VLLM_STEPS = ("synth", "mine")
+
+
+def _exit_now(code: int) -> None:
+    import os
+
+    logging.shutdown()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

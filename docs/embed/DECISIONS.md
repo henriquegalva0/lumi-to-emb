@@ -54,6 +54,8 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **Leitura em streaming dos parquets** (`HfFileSystem` + `pyarrow`), sem a biblioteca `datasets` | Funciona nos dois ambientes; mesma abordagem da Etapa 1 |
 | **Personas de uma lista fixa** (40 perfis), sem a recuperação das 5 melhores do Persona Hub | Simplificação, para não depender de mais um índice. A lista está na configuração |
 | **Sem dados sintéticos de classificação e clustering** nesta versão | O componente "outras tarefas" usa STS (paráfrase + contraste) e o bitexto real. O schema já prevê as outras tarefas |
+| **S1 realizado com 284.938 exemplos** (pedido: 400 mil) | O filtro do teacher (cosseno > 0,7) descartou ~1/3 dos sintéticos de retrieval e o estoque de pares naturais se esgotou depois do S2 e do dev. Completar com o mMARCO e o inglês que sobraram levaria o S1 a ~47 % de dados traduzidos ou em inglês; manteve-se a composição centrada em PT-BR nativo (72 %), com 139 passos |
+| **`retrieval_long` minerada depois** (`mining.defer_families`) | O primeiro job ficou 8 h sem saída nessa família; ela só alimenta o S-long (C3-long, ablação A13), fora do caminho do modelo publicado |
 | **Rotulados PT vazios** | Todos os candidatos do plano são tarefas de avaliação; a política é o zero-shot limpo |
 | **Teacher padrão 4B** (8B opcional) | Vazão. Os dois estão entre os melhores modelos abertos no MTEB-BR |
 
