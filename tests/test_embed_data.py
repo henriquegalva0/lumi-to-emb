@@ -260,9 +260,12 @@ def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
             v[int(hashlib.md5(w.encode()).hexdigest(), 16) % dim] += 1.0
         return v
 
+    engines = []
+
     class FakeLLM:
         def __init__(self, **kwargs):
             assert kwargs.get("runner") == "pooling"
+            engines.append(1)
 
         def embed(self, texts, use_tqdm=False, tokenization_kwargs=None):
             assert tokenization_kwargs["truncation"] is True
@@ -303,6 +306,11 @@ def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
     ret = [json.loads(x) for x in (tmp_path / "data/embed/mined/retrieval.jsonl").read_text().splitlines()]
     assert sum(len(r["negatives"]) for r in ret) > 0  # outras cidades viram negativos
     assert (tmp_path / "data/embed/mined/stats.json").exists()
+    # retomada: famílias prontas (arquivo + stats_<família>.json) não são refeitas nem carregam o teacher
+    assert all((tmp_path / f"data/embed/mined/stats_{fam}.json").exists() for fam in stats)
+    (tmp_path / "data/embed/mined/stats_sts.json").unlink()   # simula um job que morreu antes do sts
+    stats2 = run_mine(data_cfg)
+    assert stats2 == stats and len(engines) == 2               # só o sts foi refeito
 
 
 def test_spun_text_filter():

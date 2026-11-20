@@ -86,6 +86,22 @@ class Teacher:
         return self.cfg["query_template"].format(instruction=inst, query=ex["query"])
 
 
+def _embed_all(teacher: Teacher, texts: list[str], bs: int, what: str):
+    """Embeddings em lotes, com progresso no log (a família longa leva horas)."""
+    import time
+
+    import torch
+
+    out, t0 = [], time.time()
+    for i in range(0, len(texts), bs):
+        out.append(teacher.embed(texts[i : i + bs]))
+        done = min(i + bs, len(texts))
+        el = time.time() - t0
+        log.info("    %s: %d/%d (%.0f min; ~%.0f min restantes)", what, done, len(texts), el / 60,
+                 el / done * (len(texts) - done) / 60)
+    return torch.cat(out)
+
+
 def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: dict) -> tuple[list[dict], dict]:
     import torch
 
@@ -110,9 +126,10 @@ def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: 
     if symmetric:  # nas tarefas simétricas o teacher também recebe a instrução nos documentos
         inst = rows[0].get("instruction") or mcfg["default_instruction"]
         d_inputs = [mcfg["query_template"].format(instruction=inst, query=d) for d in docs]
-    bs = int(mcfg.get("embed_chunk", 16384))
-    Q = torch.cat([teacher.embed(q_inputs[i : i + bs]) for i in range(0, len(q_inputs), bs)])
-    D = torch.cat([teacher.embed(d_inputs[i : i + bs]) for i in range(0, len(d_inputs), bs)])
+    long_docs = teacher.max_len > int(mcfg["max_len"])
+    bs = int(mcfg.get("embed_chunk_long" if long_docs else "embed_chunk", 2048 if long_docs else 16384))
+    Q = _embed_all(teacher, q_inputs, bs, "queries")
+    D = _embed_all(teacher, d_inputs, bs, "documentos")
     k_store, top = int(mcfg["store_negatives"]), int(mcfg["search_top"])
     perc, thr, rank_k = float(mcfg["percpos"]), float(mcfg["synthetic_min_cos"]), int(mcfg["positive_rank_check"])
     kept, stats = [], {"in": len(rows), "drop_low_cos": 0, "drop_rank": 0, "few_negatives": 0}
@@ -161,17 +178,27 @@ def run_mine(cfg: dict, inputs: list[str] | None = None) -> dict:
     if not groups:
         raise EmbedError("Nada para minerar: rode as fontes, a síntese e a descontaminação antes.")
     all_stats = {}
-    teacher = Teacher(mcfg)
+    teacher = None
     for fam, rows in sorted(groups.items()):
+        out = data_dir("mined", f"{fam}.jsonl")
+        fam_stats = data_dir("mined", f"stats_{fam}.json")
+        if out.exists() and fam_stats.exists():  # família já minerada (job anterior): não refaz
+            all_stats[fam] = json.loads(fam_stats.read_text())
+            log.info("%s já minerada (%d exemplos); pulando", fam, all_stats[fam].get("out", -1))
+            continue
+        if teacher is None:
+            teacher = Teacher(mcfg)
         teacher.max_len = int(mcfg["max_len_long"] if fam == "retrieval_long" else mcfg["max_len"])
         log.info("Minerando %s: %d exemplos (max_len %d)", fam, len(rows), teacher.max_len)
         kept, stats = mine_group(teacher, rows, [], mcfg)
         _free_gpu()
-        out = data_dir("mined", f"{fam}.jsonl")
         out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w", encoding="utf-8") as fh:
+        tmp = out.with_suffix(".jsonl.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
             for r in kept:
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        tmp.replace(out)
+        write_json(fam_stats, stats)  # gravado por último: marca a família como concluída
         all_stats[fam] = stats
         log.info("  %s", stats)
     write_json(data_dir("mined", "stats.json"), all_stats)
