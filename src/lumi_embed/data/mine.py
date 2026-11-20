@@ -43,12 +43,61 @@ def near_duplicate(a: str, b: str, threshold: float = 0.8) -> bool:
     return len(ga & gb) / len(ga | gb) >= threshold
 
 
+class NearDup:
+    """`near_duplicate` com a assinatura de cada texto calculada uma vez só.
+
+    Mesma regra (palavras iguais, ou Jaccard de 3-gramas de palavras ≥ limiar), mas os 3-gramas
+    viram um vetor ordenado de hashes de 64 bits guardado em cache. Sem isso, cada query refazia os
+    conjuntos do positivo e de até 64 candidatos: em documentos longos, horas só nessa checagem.
+    """
+
+    def __init__(self, threshold: float = 0.8, n: int = 3):
+        import numpy as np
+
+        self.np, self.t, self.n, self._cache = np, threshold, n, {}
+
+    def sig(self, text: str):
+        s = self._cache.get(text)
+        if s is None:
+            w = _words(text)
+            g = self.np.unique(self.np.fromiter(
+                (hash(tuple(w[i : i + self.n])) for i in range(max(0, len(w) - self.n + 1))), dtype=self.np.int64))
+            s = (hash(tuple(w)), len(w), g)
+            self._cache[text] = s
+        return s
+
+    def __call__(self, a: str, b: str) -> bool:
+        ha, na, ga = self.sig(a)
+        hb, nb, gb = self.sig(b)
+        if ha == hb and na == nb:
+            return True
+        la, lb = len(ga), len(gb)
+        if not la or not lb or min(la, lb) / max(la, lb) < self.t:  # Jaccard ≤ min/max
+            return False
+        inter = len(self.np.intersect1d(ga, gb, assume_unique=True))
+        return inter / (la + lb - inter) >= self.t
+
+
 def select_negatives(cands: list[tuple[str, float]], positive: str, pos_score: float, k: int, perc: float,
-                     ) -> tuple[list[dict], list[dict]]:
-    """(TopK-PercPos, top-k ingênuo) a partir de candidatos ordenados por score decrescente."""
-    clean = [(t, s) for t, s in cands if not near_duplicate(t, positive)]
-    percpos = [{"text": t, "score": round(s, 4)} for t, s in clean if s < perc * pos_score][:k]
-    naive = [{"text": t, "score": round(s, 4)} for t, s in clean][:k]
+                     dup=None) -> tuple[list[dict], list[dict]]:
+    """(TopK-PercPos, top-k ingênuo) a partir de candidatos ordenados por score decrescente.
+
+    Para assim que as duas listas têm k itens e só checa quase-duplicata nos candidatos que entrariam.
+    """
+    is_dup = dup or near_duplicate
+    percpos: list[dict] = []
+    naive: list[dict] = []
+    for t, s in cands:
+        if len(percpos) >= k and len(naive) >= k:
+            break
+        want_naive = len(naive) < k
+        want_perc = len(percpos) < k and s < perc * pos_score
+        if not (want_naive or want_perc) or is_dup(t, positive):
+            continue
+        if want_naive:
+            naive.append({"text": t, "score": round(s, 4)})
+        if want_perc:
+            percpos.append({"text": t, "score": round(s, 4)})
     return percpos, naive
 
 
@@ -133,6 +182,7 @@ def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: 
     k_store, top = int(mcfg["store_negatives"]), int(mcfg["search_top"])
     perc, thr, rank_k = float(mcfg["percpos"]), float(mcfg["synthetic_min_cos"]), int(mcfg["positive_rank_check"])
     kept, stats = [], {"in": len(rows), "drop_low_cos": 0, "drop_rank": 0, "few_negatives": 0}
+    dup = NearDup()  # assinaturas em cache por família (cada documento é processado uma vez)
     pidx = torch.tensor(pos_idx, device=Q.device)
     for s in range(0, len(rows), 4096):
         q = Q[s : s + 4096]
@@ -152,7 +202,7 @@ def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: 
                 stats["drop_rank"] += 1
                 continue
             cands = [(docs[int(i)], float(v)) for v, i in zip(vals[j], ids[j]) if int(i) != pos_idx[s + j]]
-            percpos, naive = select_negatives(cands, r["positive"], ps, k_store, perc)
+            percpos, naive = select_negatives(cands, r["positive"], ps, k_store, perc, dup=dup)
             prior = [n for n in (r.get("negatives") or []) if n.get("kind") in ("nli", "contraste")]
             r = {**r, "pos_score": round(ps, 4), "negatives": prior + percpos, "naive_negatives": prior + naive,
                  "teacher": {"model": mcfg["model"], "rank_pos": int(rank[j])}}

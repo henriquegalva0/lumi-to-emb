@@ -392,3 +392,35 @@ def test_eval_index_key_compatible_with_previous_runs(data_cfg, tmp_path, monkey
     monkeypatch.setattr(dc, "eval_tasks", lambda b: (_ for _ in ()).throw(AssertionError("não devia reindexar")))
     dc_cfg["skip_tasks"] = []
     assert list(dc.build_index(data_cfg)["ngrams"]) == [1, 2]
+
+
+def test_cached_near_dup_matches_reference_and_selection_is_unchanged():
+    # A versão com cache e parada antecipada tem de dar exatamente o mesmo resultado da original.
+    from lumi_embed.data.mine import NearDup
+
+    rng = random.Random(0)
+    vocab = [f"p{i}" for i in range(30)]
+    base = [" ".join(rng.choice(vocab) for _ in range(rng.randint(2, 60))) for _ in range(40)]
+    variants = []
+    for b in base:
+        w = b.split()
+        for _ in range(3):
+            v = list(w)
+            for _ in range(rng.randint(0, 4)):
+                if v:
+                    v[rng.randrange(len(v))] = rng.choice(vocab)
+            variants.append(" ".join(v) + rng.choice(["", ".", "!"]))
+    texts = base + variants + ["A casa é azul.", "a casa É azul", "", "um dois"]
+    dup = NearDup()
+    for a in texts[::3]:
+        for b in texts[::5]:
+            assert dup(a, b) == near_duplicate(a, b), (a, b)
+    for _ in range(50):
+        pos = rng.choice(texts)
+        cands = sorted(((rng.choice(texts), rng.random()) for _ in range(20)), key=lambda x: -x[1])
+        ps = rng.random()
+        ref_clean = [(t, s) for t, s in cands if not near_duplicate(t, pos)]
+        ref_perc = [{"text": t, "score": round(s, 4)} for t, s in ref_clean if s < 0.95 * ps][:4]
+        ref_naive = [{"text": t, "score": round(s, 4)} for t, s in ref_clean][:4]
+        assert select_negatives(cands, pos, ps, 4, 0.95, dup=dup) == (ref_perc, ref_naive)
+        assert select_negatives(cands, pos, ps, 4, 0.95) == (ref_perc, ref_naive)
