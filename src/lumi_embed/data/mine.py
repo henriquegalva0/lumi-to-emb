@@ -229,7 +229,12 @@ def run_mine(cfg: dict, inputs: list[str] | None = None) -> dict:
         raise EmbedError("Nada para minerar: rode as fontes, a síntese e a descontaminação antes.")
     all_stats = {}
     teacher = None
+    deferred = set(mcfg.get("defer_families") or [])
     for fam, rows in sorted(groups.items()):
+        if fam in deferred:
+            log.warning("%s adiada (mining.defer_families): %d exemplos não minerados agora", fam, len(rows))
+            all_stats[fam] = {"in": len(rows), "deferred": True}
+            continue
         out = data_dir("mined", f"{fam}.jsonl")
         fam_stats = data_dir("mined", f"stats_{fam}.json")
         if out.exists() and fam_stats.exists():  # família já minerada (job anterior): não refaz

@@ -290,7 +290,8 @@ def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
     clean = tmp_path / "data/embed/clean"
     clean.mkdir(parents=True)
     (clean / "a.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
-    data_cfg["mining"].update(inputs=["clean/a.jsonl"], embed_chunk=10, synthetic_min_cos=0.0, positive_rank_check=64)
+    data_cfg["mining"].update(inputs=["clean/a.jsonl"], embed_chunk=10, synthetic_min_cos=0.0, positive_rank_check=64,
+                              defer_families=[])
 
     stats = run_mine(data_cfg)
     assert set(stats) == {"retrieval", "retrieval_long", "sts"}
@@ -311,6 +312,13 @@ def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
     (tmp_path / "data/embed/mined/stats_sts.json").unlink()   # simula um job que morreu antes do sts
     stats2 = run_mine(data_cfg)
     assert stats2 == stats and len(engines) == 2               # só o sts foi refeito
+    # família adiada: não é minerada nem gera arquivo, e o resto continua pulado
+    (tmp_path / "data/embed/mined/stats_retrieval_long.json").unlink()
+    (tmp_path / "data/embed/mined/retrieval_long.jsonl").unlink()
+    data_cfg["mining"]["defer_families"] = ["retrieval_long"]
+    stats3 = run_mine(data_cfg)
+    assert stats3["retrieval_long"] == {"in": 3, "deferred": True} and len(engines) == 2
+    assert not (tmp_path / "data/embed/mined/retrieval_long.jsonl").exists()
 
 
 def test_spun_text_filter():
