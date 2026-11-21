@@ -22,6 +22,22 @@ FAM = {
     "Rer": ["MultiLongDocReranking", "WikipediaRerankingMultilingual", "XGlueWPRReranking"],
 }
 SMOKE = ["FaqBacenRetrieval", "AssinSTS", "Assin2STS", "SICK-BR-STS"]
+# Categorias do MTEB-BR (mteb_pt.TASKS_BY_CATEGORY, v2.0.0), para ver onde estão as diferenças.
+BR_CAT = {
+    "Cls": ["HateBR", "ToxSynPT", "FactckBrClassification", "PortuLexRRIP"],
+    "MLCls": ["BrighterEmotionMultilabelClassification"],
+    "Pair": ["AssinRTE", "InferBR"],
+    "STS": ["AssinSTS", "Assin2STS"],
+    "Clust": ["WikipediaPTCategoriesClusteringP2P", "MedPTClustering", "JurisTCUClusteringP2P",
+              "SciELOClusteringP2P", "StackoverflowPtClustering"],
+    "Ret": ["Quati", "JurisTCU", "BRTaxQAR", "FaQuADIR", "MedPTRetrieval", "FaqBacenRetrieval"],
+    "Rer": ["QuatiReranking", "JurisTCUReranking"],
+}
+
+
+def fam_cols(s: dict[str, float], groups: dict[str, list[str]], width: int) -> str:
+    return "  ".join(f"{100 * statistics.mean(s[t] for t in ts):{width}.1f}" if all(t in s for t in ts)
+                     else f"{'—':>{width}s}" for ts in groups.values())
 
 
 def scores(model_dir: Path) -> dict[str, float]:
@@ -45,12 +61,15 @@ br = json.loads(br_file.read_text()) if br_file.exists() else []
 filt = sys.argv[1] if len(sys.argv) > 1 else ""
 if not cache.exists():
     sys.exit(f"Sem resultados em {cache}")
+models = [(d.name, scores(d)) for d in sorted(p for p in cache.iterdir() if p.is_dir() and filt in p.name)]
+print("MTEB-BR (média das 22) | MTEB-PT por família | smoke")
 print(f"{'modelo':42s} {'MTEB-BR':>14s}  " + "  ".join(f"{k:>5s}" for k in FAM) + "   smoke (" + ", ".join(SMOKE) + ")")
-for d in sorted(p for p in cache.iterdir() if p.is_dir() and filt in p.name):
-    s = scores(d)
+for name, s in models:
     got = [t for t in br if t in s]
     mbr = f"{100 * statistics.mean(s[t] for t in got):.2f}" if br and len(got) == len(br) else f"— ({len(got)}/{len(br)})"
-    fams = "  ".join(f"{100 * statistics.mean(s[t] for t in ts):5.1f}" if all(t in s for t in ts) else f"{'—':>5s}"
-                     for ts in FAM.values())
     smoke = " ".join(f"{100 * s[t]:.1f}" if t in s else "—" for t in SMOKE)
-    print(f"{d.name:42s} {mbr:>14s}  {fams}   {smoke}")
+    print(f"{name:42s} {mbr:>14s}  {fam_cols(s, FAM, 5)}   {smoke}")
+print("\nMTEB-BR por categoria (média das tarefas de cada uma; entre parênteses, quantas)")
+print(f"{'modelo':42s} " + "  ".join(f"{k + f'({len(v)})':>8s}" for k, v in BR_CAT.items()))
+for name, s in models:
+    print(f"{name:42s} {fam_cols(s, BR_CAT, 8)}")
