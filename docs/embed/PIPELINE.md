@@ -47,7 +47,7 @@ setup → check → eval R0/R0e (referência zero-shot)
 | 21 | `publish <ID>` / `publish <ID> --release` | não | Envia o checkpoint ao Hub (branch próprio) ou como release (`main`) | repositório do modelo |
 | 22 | `card` | não | Envia o model card e a documentação ao Hub | idem |
 
-O **modelo publicado** (`lumi-emb`) é o melhor no dev entre os merges e os checkpoints finais. Para publicar o escolhido com esse nome, copie a pasta (`cp -r checkpoints/M-C checkpoints/lumi-emb`) e rode `verify lumi-emb`, `eval lumi-emb …` e `publish lumi-emb --release`.
+O **modelo publicado** (`lumi-emb`) é o melhor no dev entre os merges e os checkpoints finais: o merge, se empata ou supera o melhor checkpoint individual no dev; senão, esse checkpoint. Os benchmarks não entram na escolha. `python3 jobs/embed/choose_release.py` aplica a regra a partir do `merge_report.json`, cria `checkpoints/lumi-emb/` e grava a proveniência em `choice.json`. Depois, rode `verify lumi-emb`, `eval lumi-emb …` e `publish lumi-emb --release`.
 
 ## Com o Sauron
 

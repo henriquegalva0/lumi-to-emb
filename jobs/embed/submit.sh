@@ -36,7 +36,7 @@ case "$STEP" in
   synth|mine)              hours=12 ;;
   train|baseline)          hours=12 ;;
   eval)                    hours=12; mem=32g ;;   # pico medido no MTEB-BR/PT: 7,4 GB
-  merge)                   hours=6; mem=32g ;;
+  merge)                   hours=6; mem=64g ;;    # M-C: ram pico 31,7 GB (cache dos safetensors)
 esac
 # Suítes grandes: o MTEB eng v2 inclui o MindSmallReranking (2,36 milhões de queries; só carregá-lo
 # usou ~31 GB de RAM no decontam, e os embeddings somam ~30 GB em float32). Mais RAM e tempo.
