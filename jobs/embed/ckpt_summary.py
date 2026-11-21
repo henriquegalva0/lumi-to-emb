@@ -29,6 +29,13 @@ for d in dirs:
         traj = [(r["step"], r["dev"].get("mean_ndcg@10")) for r in recs if r.get("dev")]
         if traj:
             print("dev nDCG@10 por passo: " + "  ".join(f"{s}:{v:.4f}" for s, v in traj))
+    mr = d / "merge_report.json"
+    if mr.exists():
+        r = json.loads(mr.read_text())
+        print(f"merge: escolhido {r['selected']} | melhor individual {r['best_individual']} | "
+              f"merge >= melhor individual no dev: {r['merge_beats_best_individual_on_dev']}")
+        for vid, m in sorted(r["dev"].items(), key=lambda kv: -kv[1]["mean_ndcg@10"]):
+            print(f"   {vid:44s} dev {m['mean_ndcg@10']:.4f}  Borda {r['borda'].get(vid)}")
     s = d / "summary.json"
     if not s.exists():
         print("(sem summary.json: treino não terminou ou é um checkpoint sem treino)")
