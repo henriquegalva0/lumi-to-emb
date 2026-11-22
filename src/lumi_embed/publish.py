@@ -31,6 +31,11 @@ def _api():
     return HfApi(token=token)
 
 
+def _ensure_repo(api, repo: str) -> None:
+    """Cria o repositório do modelo como privado se ele não existir; não muda a visibilidade de um existente."""
+    api.create_repo(repo_id=repo, repo_type="model", private=True, exist_ok=True)
+
+
 def card_files() -> dict[str, Path]:
     """Arquivos do model card e da documentação enviados ao repositório do modelo."""
     files = {"README.md": REPO_ROOT / "docs" / "huggingface" / "README.md"}
@@ -45,6 +50,7 @@ def card_files() -> dict[str, Path]:
 
 def push_card(repo: str, message: str | None = None) -> str:
     api = _api()
+    _ensure_repo(api, repo)
     files = card_files()
     if "README.md" not in files:
         raise EmbedError("Model card ausente: docs/huggingface/README.md")
@@ -64,6 +70,7 @@ def publish_checkpoint(repo: str, ckpt_id: str, release: bool = False) -> str:
     folder = ckpt_dir(ckpt_id) / "model"
     if not (folder / "config.json").exists():
         raise EmbedError(f"Checkpoint {ckpt_id} não encontrado em {folder}")
+    _ensure_repo(api, repo)
     revision = "main" if release else ckpt_id
     if not release:
         api.create_branch(repo_id=repo, branch=ckpt_id, repo_type="model", exist_ok=True)

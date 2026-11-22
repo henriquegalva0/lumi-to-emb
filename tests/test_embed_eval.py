@@ -93,6 +93,19 @@ def test_report_release_seeds_and_hypotheses(tmp_path, monkeypatch):
     assert hyp["H2"].rstrip().endswith("| — |")                 # C2-direct não rodou
     pair = next(line for line in md.splitlines() if line.startswith("| lumi-emb − Qwen3-Embedding-4B"))
     assert "-4.00" in pair and "0/22" in pair
+    assert "## Sensibilidade à contaminação" not in md     # sem auditoria, sem a seção
+    audit = {"sets": {"S1/train": {"hits": [{"field": "positive", "tasks": ["Quati"]},
+                                            {"field": "negative", "tasks": ["HateBR"]},
+                                            {"field": "query", "tasks": ["outra"]}]},
+                      "S1/dev": {"hits": [{"field": "query", "tasks": ["JurisTCU"]}]}}}
+    d = tmp_path / "results/embed/contamination"
+    d.mkdir(parents=True)
+    (d / "audit.json").write_text(json.dumps(audit))
+    assert rep.contaminated_tasks() == ["Quati"]          # só query/positivo dos conjuntos de treino
+    md = rep.build_report({})
+    sec = md.split("## Sensibilidade à contaminação")[1].split("\n## ")[0]
+    row = next(line for line in sec.splitlines() if line.startswith("| Qwen3-Embedding-4B"))
+    assert "| 66.05 | 66.03 |" in row and "-4.00" in row and "Mean21" in sec
 
 
 def test_instruction_resolution():
@@ -126,3 +139,43 @@ def test_same_max_length_for_every_model():
     st = types.SimpleNamespace(max_seq_length=32768)
     assert cap_length(types.SimpleNamespace(model=st), 512) and st.max_seq_length == 512
     assert not cap_length(types.SimpleNamespace(model=object()), 512)
+
+
+def test_publish_creates_private_repo_branch_and_card(tmp_path, monkeypatch):
+    import sys
+    import types
+    from pathlib import Path
+
+    from lumi_embed import publish as pub
+
+    calls = []
+
+    class FakeApi:
+        def __init__(self, token):
+            calls.append(("token", bool(token)))
+
+        def create_repo(self, **kw):
+            calls.append(("create_repo", kw["repo_id"], kw["private"], kw["exist_ok"]))
+
+        def create_branch(self, **kw):
+            calls.append(("branch", kw["branch"]))
+
+        def upload_folder(self, **kw):
+            names = sorted(p.name for p in Path(kw["folder_path"]).iterdir())
+            calls.append(("upload", kw["revision"], names))
+            return "ok"
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(HfApi=FakeApi))
+    monkeypatch.setenv("HF_TOKEN", "x")
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    m = tmp_path / "checkpoints" / "C2" / "model"
+    m.mkdir(parents=True)
+    (m / "config.json").write_text("{}")
+    pub.publish_checkpoint("org/repo", "C2")
+    assert ("create_repo", "org/repo", True, True) in calls and ("branch", "C2") in calls
+    assert ("upload", "C2", ["config.json"]) in calls
+    calls.clear()
+    pub.publish_checkpoint("org/repo", "C2", release=True)
+    ups = [c for c in calls if c[0] == "upload"]
+    assert ups[0][1] == "main" and ups[1][1] == "main" and "README.md" in ups[1][2]   # pesos, depois o card
+    assert not any(c[0] == "branch" for c in calls)

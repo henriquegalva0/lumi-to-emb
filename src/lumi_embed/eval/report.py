@@ -86,6 +86,10 @@ LITERATURE = [
      "mmteb": "55.2 / 59.4 (eixo tarefa) [5]", "longembed": "40.8 / 44.5 [5]", "hf": None},
 ]
 BASELINE_NAMES = {m["hf"]: m["model"] for m in LITERATURE if m["hf"]}
+CONTAM_NOTE = ("A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de treino que "
+               "coincidem com textos destas tarefas, que o índice usado no filtro não cobria: {tasks}. São no "
+               "máximo 0,1 % dos exemplos de cada conjunto. Para medir o efeito, a média é refeita sem essas "
+               "tarefas, e a comparação pareada é repetida.")
 A2_NOTE = ("No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 "
            "completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão "
            "na mesma escala, prevista no plano, fica para a fase de ablações.")
@@ -133,11 +137,12 @@ def _mean22(s: dict) -> dict:
     return bootstrap_mean([s[t] for t in MTEB_BR_TASKS]) if _complete(s) else NA
 
 
-def _paired(a: dict, b: dict) -> dict:
-    """Bootstrap pareado nas 22 tarefas do MTEB-BR; só com as 22 dos dois lados."""
+def _paired(a: dict, b: dict, tasks: list[str] | None = None) -> dict:
+    """Bootstrap pareado nas tarefas do MTEB-BR (todas, por padrão); só com as 22 dos dois lados."""
     if not (_complete(a) and _complete(b)):
         return NA
-    return paired_bootstrap({t: a[t] for t in MTEB_BR_TASKS}, {t: b[t] for t in MTEB_BR_TASKS})
+    tasks = tasks or MTEB_BR_TASKS
+    return paired_bootstrap({t: a[t] for t in tasks}, {t: b[t] for t in tasks})
 
 
 def _table(headers: list[str], rows: list[list]) -> str:
@@ -192,6 +197,51 @@ def suite_lists() -> dict[str, list[str]]:
         if f.exists():
             lists[suite] = json.loads(f.read_text())
     return lists
+
+
+TRAINED_SETS = ("S1/train", "S2/train", "S2-real/train", "S2-syn/train")
+
+
+def contaminated_tasks() -> list[str]:
+    """Tarefas do MTEB-BR com texto de treino (query ou positivo) acusado pela auditoria posterior."""
+    audit = _json(results_dir("contamination", "audit.json"))
+    out = set()
+    for key, st in (audit.get("sets") or {}).items():
+        if key in TRAINED_SETS:
+            for h in st.get("hits") or []:
+                if h.get("field") in ("query", "positive"):
+                    out.update(t for t in h.get("tasks", []) if t in MTEB_BR_TASKS)
+    return [t for t in MTEB_BR_TASKS if t in out]
+
+
+def contamination_rows(S: dict, measured: list[str]) -> tuple[list[str], list[list], list[str]]:
+    flagged = contaminated_tasks()
+    if not flagged:
+        return [], [], []
+    clean = [t for t in MTEB_BR_TASKS if t not in flagged]
+    h = ["Modelo", "Mean22", f"Mean{len(clean)} (sem as {len(flagged)})", "lumi-emb − modelo (22)",
+         f"lumi-emb − modelo ({len(clean)})", f"p ({len(clean)})"]
+    rows = []
+    for c in ["lumi-emb", "C2"] + measured:
+        s = S[c]
+        if not _complete(s):
+            continue
+        r22, rc = (NA, NA) if c == "lumi-emb" else (_paired(S["lumi-emb"], s), _paired(S["lumi-emb"], s, clean))
+        rows.append([BASELINE_NAMES.get(c, c), _pct(_mean(s, MTEB_BR_TASKS)), _pct(_mean(s, clean)),
+                     "—" if c == "lumi-emb" else f"{100 * r22['delta']:+.2f}" if r22.get("n") else "—",
+                     _delta(rc), _p(rc)])
+    return h, rows, flagged
+
+
+def merge_grid(name: str = "M-C") -> tuple[list[str], list[list]]:
+    rep = _json(ckpt_dir(name) / "merge_report.json")
+    if not rep:
+        return [], []
+    rows = []
+    for vid, m in sorted(rep["dev"].items(), key=lambda kv: -kv[1]["mean_ndcg@10"]):
+        tag = "escolhido" if vid == rep["selected"] else ("melhor individual" if vid == rep["best_individual"] else "")
+        rows.append([vid, f"{m['mean_ndcg@10']:.4f}", rep.get("borda", {}).get(vid, "—"), tag])
+    return ["Candidato", "dev nDCG@10", "Borda", ""], rows
 
 
 def dev_info(c: str) -> dict:
@@ -341,6 +391,13 @@ def build_report(ecfg: dict) -> str:
         _write_csv(tables / "table14b_paired.csv", h14b, rows14b)
         md += ["## Tabela 14b — Comparação pareada no MTEB-BR\n", _table(h14b, rows14b), ""]
 
+    # Sensibilidade à contaminação (auditoria posterior)
+    hc, rc, flagged = contamination_rows(S, measured)
+    if rc:
+        _write_csv(tables / "contamination_sensitivity.csv", hc, rc)
+        md += ["## Sensibilidade à contaminação\n", CONTAM_NOTE.format(tasks=", ".join(flagged)), "",
+               _table(hc, rc), ""]
+
     # Tabela 15 — ablações
     h15 = ["ID", "Pergunta", "Comparação", "Δ Mean22 [IC 95%]", "p", "Tarefas"]
     rows15 = []
@@ -374,6 +431,10 @@ def build_report(ecfg: dict) -> str:
                      js.get("steps", "—"), js.get("train_minutes", "—"), note])
     if rdev:
         md += ["## Dev set (seleção de checkpoints)\n", _table(hdev, rdev), ""]
+    hg, rg = merge_grid()
+    if rg:
+        _write_csv(tables / "merge_grid_M-C.csv", hg, rg)
+        md += ["## Grade do merge M-C (dev)\n", _table(hg, rg), ""]
 
     text = "\n".join(md) + "\n"
     out = REPO_ROOT / "docs" / "embed" / "RESULTS.md"
@@ -409,6 +470,10 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev) -> str:
     rex = [r for r in rex if _filled(r)]
     if rex:
         md += ["#### Outras suítes\n", _table(["Modelo"] + list(EXTRA_SUITES.values()), rex), ""]
+    hcn, rcn, flagged = contamination_rows(S, measured)
+    if rcn:
+        md += ["#### Sensibilidade à contaminação\n", CONTAM_NOTE.format(tasks=", ".join(flagged)), "",
+               _table(hcn, rcn), ""]
     rc = []
     devs = {r[0]: r for r in rdev}
     for c in CHECKPOINTS:
@@ -417,6 +482,9 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev) -> str:
             rc.append(row)
     md += ["#### Checkpoints deste trabalho\n",
            _table(["Checkpoint", "MTEB-BR Mean22 [IC 95%]", "dev nDCG@10", "Observação"], rc), ""]
+    hg, rg = merge_grid()
+    if rg:
+        md += ["#### Grade do merge M-C (dev)\n", _table(hg, rg), ""]
     if seeds:
         hs, rs = seeds
         md += ["#### Variação entre sementes (C2)\n", _table(hs, rs[:1 + len(MTEB_BR_CATEGORIES)]), ""]
