@@ -20,7 +20,7 @@ Um único schema JSONL para todas as tarefas ([`schema.py`](../../src/lumi_embed
 | `source` | dataset e revisão, ou gerador, persona, tipo, dificuldade e semente |
 | `split` | `train` ou `dev` (não há `test`: os testes são os benchmarks externos) |
 
-Formato de entrada no modelo: query = `Instruct: {instrução}\nQuery: {query}` + EOS; documento = texto + EOS, sem instrução. Comprimento máximo de 512 tokens no S1 e no S2; de 2k a 8k no S-long.
+Formato de entrada no modelo: query = `Instruct: {instrução}\nQuery: {query}` + EOS; documento = texto + EOS, sem instrução. Comprimento máximo de 512 tokens no S1 e no S2; de 2k a 8k no S-long (ainda não executado nesta versão).
 
 ## Fontes reais (D<sub>real</sub>)
 
@@ -78,7 +78,38 @@ Política **zero-shot limpo** ([`decontaminate.py`](../../src/lumi_embed/data/de
    - o exemplo sai se a query ou o positivo aparece inteiro na avaliação, ou se ≥ 30 % dos seus 13-gramas estão no índice;
    - negativos contaminados saem sozinhos.
    - **qualidade:** sai também o texto "spinado" de fazendas de conteúdo (sinônimos trocados automaticamente, com marcas como "situaçãeste" e "atuaçãeste"), encontrado nas sementes da FineWeb-2 ao inspecionar a primeira síntese.
-4. **Relatório:** `results/embed/contamination/report.md`, com contagens por arquivo e por tarefa indexada. Ele é copiado para `docs/embed/` quando o `report` é gerado.
+4. **Relatório:** `results/embed/contamination/report.md`, com contagens por arquivo e por tarefa indexada.
+
+### Auditoria posterior
+
+**A falha.** No índice usado pelo filtro, 13 tarefas entraram com 0 textos:
+- as 8 de retrieval e reranking do MTEB-BR: Quati, QuatiReranking, JurisTCU, JurisTCUReranking, BRTaxQAR, FaQuADIR, MedPTRetrieval e FaqBacenRetrieval;
+- 5 das 6 do LongEmbed: NarrativeQA, Needle, QMSum, SummScreenFD e WikimQA.
+
+Essas tarefas guardam os textos em `task.corpus` e `task.queries`, num formato antigo do mteb, e o extrator só lia `task.dataset`. O erro passou em silêncio. Por isso, o filtro não conferiu essas tarefas.
+
+**A correção.** O extrator lê os dois formatos, uma tarefa sem textos agora é erro, e o índice ganhou versão (2).
+
+**A auditoria.** O passo `data audit` confere os conjuntos já treinados contra o índice corrigido, com o mesmo critério do filtro e sem alterar os dados. Ele atribui cada acerto à tarefa de onde veio. O resultado completo está em `results/embed/contamination/audit.md`.
+
+| Conjunto | Exemplos | Com acerto | Na query | No positivo | Num negativo | Exemplos por tarefa |
+|---|---|---|---|---|---|---|
+| S1 (treino) | 284.938 | 136 (0,05 %) | 17 | 57 | 65 | Quati 98, QuatiReranking 19, FaQuADIR 17, NarrativeQA 3, BRTaxQAR 2, outra 5 |
+| S2 (treino) | 120.000 | 125 (0,10 %) | 25 | 18 | 83 | Quati 75, FaQuADIR 26, QuatiReranking 20, BRTaxQAR 1, NarrativeQA 1, outra 8 |
+| S2-real | 91.072 | 68 (0,07 %) | 1 | 10 | 57 | Quati 33, FaQuADIR 20, QuatiReranking 9, NarrativeQA 1, outra 5 |
+| S2-syn | 74.142 | 85 (0,11 %) | 30 | 8 | 48 | Quati 53, FaQuADIR 21, QuatiReranking 12, BRTaxQAR 1, outra 5 |
+| Dev (S1 e S2) | 1.500 cada | 1 cada | 0 | 0 | 1 | Quati 1 |
+
+As contagens por campo somam acertos, e um exemplo pode ter mais de um. "outra" é um texto que passa do limiar só somando n-gramas de várias tarefas.
+
+**Leitura:**
+- Quase tudo vem das passagens web do Quati (ClueWeb22-PT). As sementes da síntese são páginas da FineWeb-2, e as duas fontes coletam a mesma web brasileira.
+- No FaQuAD-IR, os parágrafos aparecem sobretudo como negativos.
+- Nenhum acerto vem de FaqBacen, JurisTCU, JurisTCUReranking ou MedPT.
+
+**Efeito nas notas.** No lumi-emb e nos checkpoints, as notas das 4 tarefas com acerto em query ou positivo (Quati, QuatiReranking, FaQuADIR e BRTaxQAR) não destoam das dos baselines. Sem elas, a média e a comparação pareada mudam pouco, e as conclusões são as mesmas (seção "Sensibilidade à contaminação" do [RESULTS.md](RESULTS.md)).
+
+**Decisão.** Os checkpoints desta versão não foram retreinados. A remoção desses exemplos (refazer o filtro com o índice corrigido, a mineração, a mistura e o treino) fica para a próxima rodada de treino.
 
 **Dev set:** 300 exemplos por componente, separados **antes** dos conjuntos de treino. Ele escolhe checkpoints, LR e coeficientes de merge. Os benchmarks de teste nunca entram nessa escolha.
 
@@ -96,7 +127,43 @@ Política **zero-shot limpo** ([`decontaminate.py`](../../src/lumi_embed/data/de
 | Inglês e bitexto | — | 10 % | 10 % |
 | Negativos por exemplo | — | 1 | 4 |
 
-S1, S2 e dev não compartilham exemplos. As variantes S2-real e S2-syn têm a mesma escala do S2, cada uma só com componentes reais ou só com sintéticos.
+S1, S2 e dev não compartilham exemplos. Pelo plano, as variantes S2-real e S2-syn teriam a mesma escala do S2, cada uma só com componentes reais ou só com sintéticos. Nesta versão, ficaram menores e diferentes entre si (abaixo).
+
+## Números realizados (esta versão)
+
+Fontes de `results/embed/contamination/report.md`, `data/embed/mined/stats_*.json` e `data/embed/sets/manifest.json`.
+
+**Filtro de contaminação e qualidade** (entrada → mantidos):
+
+| Arquivo | Entrada | Mantidos | Exato | n-grama | Spinado | Negativos removidos |
+|---|---|---|---|---|---|---|
+| Wikipédia PT | 150.000 | 145.831 | 838 | 3.331 | 0 | 0 |
+| mMARCO-PT | 150.000 | 149.963 | 30 | 7 | 0 | 139 |
+| Bitexto PT↔EN | 60.000 | 59.927 | 49 | 24 | 0 | 0 |
+| Inglês (GooAQ, AllNLI) | 60.000 | 59.143 | 738 | 119 | 0 | 119 |
+| Sintético, Qwen3-30B-A3B | 85.481 | 83.772 | 6 | 1.296 | 407 | 1 |
+| Sintético, Mistral-Small-3.2-24B | 86.092 | 84.354 | 12 | 1.294 | 432 | 0 |
+| Sintético, gpt-oss-20b | 85.329 | 83.591 | 8 | 1.270 | 460 | 0 |
+
+**Mineração** (por família de tarefa):
+
+| Família | Entrada | Saída | Removidos (cosseno do teacher ≤ 0,7) | Removidos (positivo fora do top-10) | Cosseno médio do positivo |
+|---|---|---|---|---|---|
+| Retrieval curto | 499.954 | 443.590 | 56.264 | 100 | 0,711 |
+| STS | 86.342 | 86.270 | 68 | 4 | 0,901 |
+| Bitexto | 59.927 | 59.927 | 0 | 0 | 0,923 |
+| Retrieval longo | — | — | — | — | adiada (`mining.defer_families`) |
+
+**Conjuntos** (exemplos de treino por componente):
+
+| Conjunto | Natural | Sint. retrieval | Sint. STS | mMARCO-PT | Inglês e bitexto | Total |
+|---|---|---|---|---|---|---|
+| S1 (pedido: 400 mil) | 104.824 | 80.114 | 20.000 | 40.000 | 40.000 | 284.938 |
+| S2 | 22.500 | 37.500 | 30.000 | 15.000 | 15.000 | 120.000 |
+| S2-real | 22.500 | — | — | 34.286 | 34.286 | 91.072 |
+| S2-syn | — | 37.500 | 36.642 | — | — | 74.142 |
+
+Dev: 1.500 exemplos por estágio. A R1 tem 29.994 queries do mMARCO-PT. O S-long ficou vazio, porque a família de retrieval longo ainda não foi minerada. No S2-real, só 22,5 mil dos 91 mil exemplos são em PT nativo (Wikipédia); o resto é mMARCO traduzido e inglês/bitexto.
 
 ## Licenças: o que isto implica para o modelo (decisão D2)
 

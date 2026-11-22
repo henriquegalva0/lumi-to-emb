@@ -60,6 +60,7 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **`retrieval_long` minerada depois** (`mining.defer_families`) | O primeiro job ficou 8 h sem saída nessa família; ela só alimenta o S-long (C3-long, ablação A13), fora do caminho do modelo publicado |
 | **Rotulados PT vazios** | Todos os candidatos do plano são tarefas de avaliação; a política é o zero-shot limpo |
 | **Teacher padrão 4B** (8B opcional) | Vazão. Os dois estão entre os melhores modelos abertos no MTEB-BR |
+| **Índice de contaminação incompleto na primeira execução; auditoria posterior; checkpoints não retreinados** | 13 tarefas (as 8 de retrieval/reranking do MTEB-BR e 5 do LongEmbed) guardam os textos em `task.corpus`/`task.queries`, e o extrator só lia `task.dataset`: elas entraram vazias no índice, sem erro. Corrigido (índice versão 2; tarefa sem textos agora é erro). O `data audit` achou coincidências em ≤ 0,1 % dos exemplos de cada conjunto, quase todas com o Quati e o FaQuAD-IR, e nenhuma com FaqBacen, JurisTCU ou MedPT. Sem as 4 tarefas afetadas, as conclusões não mudam. A remoção fica para a próxima rodada de treino ([ficha dos dados](DATA_CARD.md#auditoria-posterior)) |
 
 ## Avaliação
 
@@ -72,6 +73,11 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **IC e p-valores com a tarefa como unidade** | Mesmo método do MTEB-BR. "Vitória" só com p < 0,05 |
 | **NanoMTEB-BR substituído por uma suíte `smoke`** (2 tarefas do MTEB-BR + 2 do MTEB-PT) | O NanoMTEB-BR não está no mteb |
 | **Tabelas geradas só a partir dos JSONs de resultado** | Regra A.3: nenhuma célula é digitada à mão. Os únicos números escritos no código são valores da literatura, com a referência |
+| **Notas × 100, com ponto decimal, em todas as tabelas** | Mesma escala do leaderboard do MTEB; os valores da literatura foram convertidos (0,6621 → 66.21) |
+| **Três sementes do C2 avaliadas nos benchmarks** (C2, C2-s2, C2-s3) | O IC por tarefa não mede a variação entre execuções. Com as sementes, o desvio-padrão do Mean22 é 0,13: diferenças menores que ~0,3 entre checkpoints não se distinguem do acaso |
+| **Modelo publicado escolhido pela regra do dev** (`jobs/embed/choose_release.py`) | O merge, se empata ou supera o melhor checkpoint individual no dev; senão, esse checkpoint. Os benchmarks não entram, porque escolher pelo MTEB-BR seria selecionar no próprio teste. O escolhido foi o M-C-base0.75 (dev 0,9779; melhor individual, C2-real, 0,9771); a proveniência fica em `checkpoints/lumi-emb/choice.json` |
+| **A origem do lumi-emb herda as notas dele no relatório** | São os mesmos pesos: o M-C não é avaliado de novo |
+| **Pesos do lumi-emb por hard link** | Copiar 8 GB na sessão de login morreu com a queda da conexão SSH; o link é instantâneo e não ocupa disco |
 
 ## O que não foi implementado (e por quê)
 

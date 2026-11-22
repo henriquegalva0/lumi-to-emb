@@ -33,7 +33,7 @@ datasets:
 
 # Lumi-Embed (lumi-4b-embedding)
 
-> **Em desenvolvimento.** Este repositório vai receber os checkpoints e o modelo final do Lumi-Embed. Ainda **não há resultados de embedding**: as tabelas abaixo são geradas automaticamente a partir dos arquivos de avaliação, e as células "—" indicam o que ainda não foi executado. Os resultados já obtidos são os da Etapa 1 (janela de contexto do `lumi-4b`).
+> **Versão de pesquisa.** O modelo publicado (branch `main`) é o **lumi-emb**, um merge de checkpoints escolhido no dev. No MTEB-BR (22 tarefas nativas em PT-BR), ele fica em **62,41**: empatado estatisticamente com o multilingual-e5-large-instruct e o Qwen3-Embedding-0.6B e abaixo do Qwen3-Embedding-4B (65,53). Em retrieval, empata com o Qwen3-Embedding-4B, e tem a maior média em classificação entre os modelos comparados. A maior distância está em clusterização e STS. As tabelas abaixo são geradas a partir dos arquivos de avaliação. As ablações restantes (trilho bidirecional, contexto longo, variantes de negativos) ainda não foram executadas.
 
 **English summary.** Lumi-Embed turns [Lumi-4B](https://huggingface.co/ceia-research/lumi-4b), a 4B hybrid Mamba-2 + attention LLM for Brazilian Portuguese, into a text-embedding model:
 
@@ -41,7 +41,9 @@ datasets:
 - staged contrastive training: a weakly supervised stage and a supervised stage with positive-aware hard negatives;
 - training data: native PT-BR synthetic data from three open generators, plus natural pairs;
 - checkpoint merging, with checkpoints selected on a held-out dev set;
-- evaluation on MTEB-BR (22 native tasks), MTEB-PT, LongEmbed and MTEB (eng, v2), under a clean zero-shot contamination policy.
+- evaluation on MTEB-BR (22 native tasks), MTEB-PT, LongEmbed and MTEB (eng, v2), under a clean zero-shot contamination policy (a filter bug left 13 tasks unchecked; a post-hoc audit found overlaps in at most 0.1 % of the training examples, and the conclusions hold without the 4 affected tasks).
+
+**Result:** 62.41 on MTEB-BR (22 native PT-BR tasks), statistically tied with multilingual-e5-large-instruct and Qwen3-Embedding-0.6B and below Qwen3-Embedding-4B (65.53). It matches Qwen3-Embedding-4B in retrieval and has the highest classification average among the compared models; it is weakest in clustering and STS.
 
 As far as we know, it is one of the first evaluations of a hybrid Mamba-Transformer as a text embedder. Code, configs and data recipes: [github.com/henriquegalva0/lumi-to-emb](https://github.com/henriquegalva0/lumi-to-emb).
 
@@ -52,7 +54,8 @@ As far as we know, it is one of the first evaluations of a hybrid Mamba-Transfor
 | Backbone | [`ceia-research/lumi-4b`](https://huggingface.co/ceia-research/lumi-4b) (revisão `27b30f4`): 42 camadas, das quais 21 Mamba-2, 17 MLP e 4 de atenção; sem RoPE; derivado do Nemotron 3 Nano 4B |
 | Embedding | estado oculto do último token (`</s>`), depois da normalização final; L2; similaridade de cosseno; dimensão 3136 |
 | Formato | query: `Instruct: {instrução}\nQuery: {query}</s>`; documento: `{texto}</s>`, sem instrução |
-| Comprimento | treinado até 512 tokens (S1/S2); o checkpoint de contexto longo vai até 8k |
+| Modelo publicado | `lumi-emb` = M-C-base0.75: 0,75 × média de cinco checkpoints do S2 (C2, C2-real, C2-syn, C2-s2, C2-s3) + 0,25 × Lumi-4B sem treino (R0) |
+| Comprimento | treinado com até 512 tokens; o estágio de contexto longo (C3-long) ainda não foi treinado |
 | Idiomas | português brasileiro (principal) e inglês |
 | Carregamento | transformers ≥ 5.23 nativo (`NemotronHModel`), **sem** `trust_remote_code` |
 
@@ -99,7 +102,17 @@ d = embed(["Inflação é o aumento generalizado e contínuo dos preços."])
 print(q @ d.T)
 ```
 
-Para usar os kernels Mamba-2 otimizados (CUDA, torch 2.12): `pip install kernels` e `AutoModel.from_pretrained(..., use_kernels=True)`. Os checkpoints intermediários ficam em branches com o nome de cada um. Exemplo: `revision="C2"`.
+**Kernels Mamba-2 otimizados** (CUDA, torch 2.12, `pip install kernels`). Sem eles, o modelo roda no caminho PyTorch puro: o resultado é o mesmo, mas fica mais lento (na B200, num passo de treino com sequências de 512 tokens, os kernels processaram 4,5× mais tokens por segundo; o caminho PyTorch puro só coube com lote 4). Ative-os depois de mover o modelo para a GPU, porque o `from_pretrained(..., use_kernels=True)` escolhe os kernels pelo dispositivo do carregamento:
+
+```python
+from kernels import Mode
+
+model = AutoModel.from_pretrained(repo, dtype=torch.bfloat16).cuda().eval()
+model.set_use_kernels(True, mode=Mode.TRAINING)   # o modo de treino também serve à inferência
+# Sentence-Transformers: model[0].auto_model.set_use_kernels(True, mode=Mode.TRAINING)
+```
+
+Os checkpoints intermediários ficam em branches com o nome de cada um. Exemplo: `revision="C2"`.
 
 ## Contexto: a janela efetiva do Lumi-4B (Etapa 1)
 
@@ -110,7 +123,7 @@ Antes do treino, medimos até quantos tokens o `lumi-4b` recupera informação. 
 | Lumi-4B | 32k | **16k** | **16k** |
 | Nemotron-3-Nano-4B (base) | 255k | 255k | 128k |
 
-O Lumi colapsa a partir de 64k: as respostas entram em laço e saem sem número. Já em 32k, ele confunde chaves e valores. A perda vem do pré-treino contínuo em janelas de 8k, porque a base mantém 255k. Por isso o embedder treina com 512 tokens e estende o contexto até 8k num estágio separado (C3-long).
+O Lumi colapsa a partir de 64k: as respostas entram em laço e saem sem número. Já em 32k, ele confunde chaves e valores. A perda vem do pré-treino contínuo em janelas de 8k, porque a base mantém 255k. Por isso o embedder treina com 512 tokens. A extensão até 8k fica para um estágio separado (C3-long), ainda não treinado.
 
 ## Arquitetura e checkpoints
 
@@ -139,7 +152,7 @@ Ba deixa só as 4 camadas de atenção bidirecionais, com as camadas Mamba causa
 - SLERP entre C2-real e C2-syn, com t ∈ {0,25; 0,5; 0,75};
 - interpolação da média com o R0, com λ ∈ {0,25; 0,5; 0,75}.
 
-A escolha é feita no dev, nunca nos testes. O modelo publicado é o melhor no dev, e todos os merges ficam nos branches com a receita no `meta.json`.
+A escolha é feita no dev, nunca nos testes. O modelo publicado é o melhor no dev. Ele fica no `main` e no branch `M-C`, com a receita no `meta.json`; as notas de todos os candidatos no dev estão na tabela "Grade do merge M-C", abaixo, e no [RESULTS.md](https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/RESULTS.md). O escolhido foi o **M-C-base0.75**, com nDCG@10 de 0,9779 no dev, contra 0,9771 do melhor checkpoint individual (C2-real). Nos benchmarks, ele ficou 0,44 ponto acima do C2 no MTEB-BR (p = 0,074 no bootstrap por tarefa) e 0,58 acima da média das três sementes do C2, cujo desvio-padrão é 0,13.
 
 ## Dados
 
@@ -153,6 +166,7 @@ Detalhes na [ficha dos dados](https://github.com/henriquegalva0/lumi-to-emb/blob
 - **Sintéticos, em PT-BR nativo:** três geradores abertos (Qwen3-30B-A3B-Instruct-2507, Mistral-Small-3.2-24B, gpt-oss-20b), com personas, tipos de consulta, dificuldades e registros sorteados, mais STS com paráfrase e contraste.
 - **Negativos:** minerados com o Qwen3-Embedding-4B pelo critério **TopK-PercPos** (score < 0,95 × score do positivo). Os sintéticos passam por um filtro de cosseno > 0,7 e precisam ter o positivo no top-10 do teacher.
 - **Contaminação:** política **zero-shot limpo**. Nenhum dataset de treino é tarefa de avaliação. Também saem os textos que coincidem com os do MTEB-BR, MTEB-PT, LongEmbed ou MTEB eng v2, inteiros ou com ≥ 30 % de 13-gramas em comum. Não há dados rotulados em PT, porque todos os candidatos são tarefas de avaliação.
+- **Falha no filtro e auditoria posterior:** o índice usado no filtro deixou de fora 13 tarefas, que guardam os textos num formato antigo do mteb: as 8 de retrieval e reranking do MTEB-BR e 5 do LongEmbed. Depois do treino, uma auditoria com o índice corrigido achou coincidências em no máximo 0,1 % dos exemplos de cada conjunto, quase todas com passagens web do Quati e com parágrafos do FaQuAD-IR (estes, sobretudo como negativos). Nenhuma com FaqBacen, JurisTCU ou MedPT. Sem as 4 tarefas afetadas, as conclusões da comparação não mudam (ver "Sensibilidade à contaminação" abaixo). Detalhes na [ficha dos dados](https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/DATA_CARD.md#auditoria-posterior).
 
 ## Avaliação
 
@@ -160,121 +174,137 @@ Protocolo igual para todos os modelos:
 
 - instrução só na query (nos dois lados nas tarefas simétricas), com as mesmas instruções em português por tipo de tarefa;
 - documentos sem instrução;
-- mesmo comprimento máximo.
+- mesmo comprimento máximo: 512 tokens (32k no LongEmbed).
 
 O benchmark principal é o **MTEB-BR**, 22 tarefas nativas ([arXiv:2607.04581](https://arxiv.org/abs/2607.04581)). Completam o quadro o **MTEB-PT** ([arXiv:2607.04071](https://arxiv.org/abs/2607.04071)), o LongEmbed e o MTEB (eng, v2); o MMTEB é opcional. Os ICs de 95 % e os p-valores usam bootstrap com a tarefa como unidade, como no MTEB-BR. Uma diferença só é declarada com p < 0,05.
 
 <!-- RESULTS:START -->
 ### Resultados
-Gerado por `lumi_embed report` a partir de `results/embed/`. Células "—" = sem resultado ainda. IC 95 % por bootstrap sobre tarefas; p-valores por bootstrap pareado (unidade = tarefa), como no MTEB-BR [16].
 
-#### Tabela 12 — Visão geral
+Notas × 100, geradas pelos arquivos de avaliação ([tabelas completas](https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/RESULTS.md)). Mesmo protocolo para todos os modelos: mesmas instruções em português, só na query, e até 512 tokens. IC 95 % e p-valores por bootstrap sobre as tarefas, como no MTEB-BR.
 
-| Checkpoint | MTEB-BR Mean22 [IC 95%] | PT STS | PT Cls | PT Ret | PT Rer | MMTEB | MTEB eng v2 | LongEmbed |
+#### MTEB-BR (22 tarefas nativas em PT-BR)
+
+| Modelo | Mean22 [IC 95%] | Classificação (4) | Multilabel (1) | Pares (2) | STS (2) | Clust. (5) | Retrieval (6) | Reranking (2) |
 |---|---|---|---|---|---|---|---|---|
-| R0 | — | — | — | — | — | — | — | — |
-| R0e | — | — | — | — | — | — | — | — |
-| R1 | — | — | — | — | — | — | — | — |
-| C1 | — | — | — | — | — | — | — | — |
-| C2 | — | — | — | — | — | — | — | — |
-| C2-real | — | — | — | — | — | — | — | — |
-| C2-syn | — | — | — | — | — | — | — | — |
-| C2-nohn | — | — | — | — | — | — | — | — |
-| C2-naivehn | — | — | — | — | — | — | — | — |
-| C2-ib | — | — | — | — | — | — | — | — |
-| C2-direct | — | — | — | — | — | — | — | — |
-| C3-long | — | — | — | — | — | — | — | — |
-| B2a | — | — | — | — | — | — | — | — |
-| B2f | — | — | — | — | — | — | — | — |
-| M-C | — | — | — | — | — | — | — | — |
-| M-B | — | — | — | — | — | — | — | — |
-| lumi-emb | — | — | — | — | — | — | — | — |
+| **lumi-emb** (este trabalho) | 62.41 [54.27, 70.14] | 67.3 | 29.6 | 85.0 | 74.8 | 52.9 | 62.2 | 58.4 |
+| Qwen3-Embedding-8B | 67.35 [59.41, 74.86] | 67.1 | 39.0 | 88.2 | 81.2 | 65.3 | 64.8 | 60.1 |
+| Qwen3-Embedding-4B | 65.53 [57.33, 73.25] | 63.7 | 36.5 | 87.2 | 80.6 | 64.9 | 62.3 | 58.2 |
+| multilingual-e5-large-instruct | 63.65 [55.38, 71.51] | 63.6 | 36.5 | 84.2 | 80.6 | 60.5 | 60.2 | 58.0 |
+| Qwen3-Embedding-0.6B | 61.67 [53.93, 69.10] | 62.7 | 32.6 | 81.4 | 76.2 | 59.6 | 58.2 | 55.4 |
+| Lumi-4B sem treino (R0) | 30.65 [20.79, 40.75] | 59.8 | 21.4 | 46.1 | 44.5 | 37.4 | 1.4 | 18.4 |
 
-#### Tabela 13 — MTEB-BR por categoria
+#### Comparação pareada no MTEB-BR
 
-| Checkpoint | Classificação (4) | Multilabel (1) | Pares (2) | STS (2) | Clusterização (5) | Retrieval (6) | Reranking (2) |
-|---|---|---|---|---|---|---|---|
-| R0 | — | — | — | — | — | — | — |
-| R0e | — | — | — | — | — | — | — |
-| R1 | — | — | — | — | — | — | — |
-| C1 | — | — | — | — | — | — | — |
-| C2 | — | — | — | — | — | — | — |
-| C2-real | — | — | — | — | — | — | — |
-| C2-syn | — | — | — | — | — | — | — |
-| C2-nohn | — | — | — | — | — | — | — |
-| C2-naivehn | — | — | — | — | — | — | — |
-| C2-ib | — | — | — | — | — | — | — |
-| C2-direct | — | — | — | — | — | — | — |
-| C3-long | — | — | — | — | — | — | — |
-| B2a | — | — | — | — | — | — | — |
-| B2f | — | — | — | — | — | — | — |
-| M-C | — | — | — | — | — | — | — |
-| M-B | — | — | — | — | — | — | — |
-| lumi-emb | — | — | — | — | — | — | — |
+| Comparação | Δ Mean22 [IC 95%] | p | Vitórias (tarefas) |
+|---|---|---|---|
+| lumi-emb − Qwen3-Embedding-4B | -3.13 [-6.21, -0.29] | 0.030 | 10/22 |
+| lumi-emb − Qwen3-Embedding-8B | -4.95 [-7.57, -2.53] | < 0.001 | 3/22 |
+| lumi-emb − Qwen3-Embedding-0.6B | +0.74 [-1.92, +3.14] | 0.560 | 14/22 |
+| lumi-emb − multilingual-e5-large-instruct | -1.25 [-3.74, +1.05] | 0.309 | 10/22 |
+| C2 − Qwen3-Embedding-4B | -3.56 [-6.60, -0.76] | 0.012 | 6/22 |
 
-#### Tabela 13b — MTEB-BR por tarefa (seleção; completo em CSV)
+#### MTEB-PT (por família)
 
-| Tarefa | R0 | R1 | C2 | B2a | B2f | M-C | M-B | lumi-emb |
-|---|---|---|---|---|---|---|---|---|
-| HateBR | — | — | — | — | — | — | — | — |
-| ToxSynPT | — | — | — | — | — | — | — | — |
-| FactckBrClassification | — | — | — | — | — | — | — | — |
-| PortuLexRRIP | — | — | — | — | — | — | — | — |
-| BrighterEmotionMultilabelClassification | — | — | — | — | — | — | — | — |
-| AssinRTE | — | — | — | — | — | — | — | — |
-| InferBR | — | — | — | — | — | — | — | — |
-| AssinSTS | — | — | — | — | — | — | — | — |
-| Assin2STS | — | — | — | — | — | — | — | — |
-| WikipediaPTCategoriesClusteringP2P | — | — | — | — | — | — | — | — |
-| MedPTClustering | — | — | — | — | — | — | — | — |
-| JurisTCUClusteringP2P | — | — | — | — | — | — | — | — |
-| SciELOClusteringP2P | — | — | — | — | — | — | — | — |
-| StackoverflowPtClustering | — | — | — | — | — | — | — | — |
-| Quati | — | — | — | — | — | — | — | — |
-| JurisTCU | — | — | — | — | — | — | — | — |
-| BRTaxQAR | — | — | — | — | — | — | — | — |
-| FaQuADIR | — | — | — | — | — | — | — | — |
-| MedPTRetrieval | — | — | — | — | — | — | — | — |
-| FaqBacenRetrieval | — | — | — | — | — | — | — | — |
-| QuatiReranking | — | — | — | — | — | — | — | — |
-| JurisTCUReranking | — | — | — | — | — | — | — | — |
+| Modelo | PT STS | PT Cls | PT Ret | PT Rer |
+|---|---|---|---|---|
+| **lumi-emb** (este trabalho) | 79.5 | 55.4 | 77.8 | 85.4 |
+| Qwen3-Embedding-8B | 84.7 | 62.6 | 78.9 | 86.0 |
+| Qwen3-Embedding-4B | 83.9 | 58.2 | 77.1 | 84.6 |
+| multilingual-e5-large-instruct | 81.8 | 56.4 | 76.6 | 86.0 |
+| Qwen3-Embedding-0.6B | 79.7 | 52.4 | 74.5 | 83.8 |
+| Lumi-4B sem treino (R0) | 42.7 | 43.6 | 0.2 | 52.0 |
 
-#### Tabela 14 — Comparação com modelos correspondentes
+#### Sensibilidade à contaminação
 
-| Modelo | Relação com o lumi-emb | MTEB-BR Mean22 | MTEB-PT (STS/Cls/Ret/Rer) | MMTEB | LongEmbed |
+A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de treino que coincidem com textos destas tarefas, que o índice usado no filtro não cobria: Quati, BRTaxQAR, FaQuADIR, QuatiReranking. São no máximo 0,1 % dos exemplos de cada conjunto. Para medir o efeito, a média é refeita sem essas tarefas, e a comparação pareada é repetida.
+
+| Modelo | Mean22 | Mean18 (sem as 4) | lumi-emb − modelo (22) | lumi-emb − modelo (18) | p (18) |
 |---|---|---|---|---|---|
-| lumi-emb (este trabalho) | — | — | — / — / — / — | — | — |
-| R0 (este trabalho) | Ponto de partida | — | — / — / — / — | — | — |
-| Qwen3-Embedding-4B | Mesmo porte, Transformer, líder aberto em PT | 0,6621 [16] | a medir | a medir | a medir |
-| Qwen3-Embedding-8B | Líder aberto no MTEB-BR | 0,6704 [16] | a medir | 70,58 [10] | a medir |
-| Qwen3-Embedding-0.6B | Baseline pequeno | a medir | 80,7 / 52,3 / 78,9 / 85,8 [17] | 64,33 [9] | a medir |
-| multilingual-e5-large-instruct | Baseline multilíngue clássico | a medir | 81,3 / 53,0 / 70,1 / 84,5 [17] | a medir | a medir |
-| gte-multilingual-base | Baseline multilíngue | a medir | 80,4 / 50,2 / 76,9 / 84,2 [17] | a medir | a medir |
-| llama-embed-nemotron-8b | Mesma família NVIDIA; receita aberta | a medir | a medir | 69,46 [10] | a medir |
-| Mamba2 1.3B / Codestral Mamba2 7B | Recorrentes puros | — | — | 55,2 / 59,4 (eixo tarefa) [5] | 40,8 / 44,5 [5] |
+| lumi-emb | 62.41 | 63.79 | — | — | — |
+| C2 | 61.97 | 63.28 | +0.44 | +0.51 [-0.07, +1.06] | 0.085 |
+| Qwen3-Embedding-4B | 65.53 | 67.27 | -3.13 | -3.48 [-7.18, -0.07] | 0.047 |
+| Qwen3-Embedding-8B | 67.35 | 68.85 | -4.95 | -5.06 [-8.15, -2.24] | < 0.001 |
+| Qwen3-Embedding-0.6B | 61.67 | 63.15 | +0.74 | +0.64 [-2.56, +3.51] | 0.659 |
+| multilingual-e5-large-instruct | 63.65 | 65.89 | -1.25 | -2.10 [-4.99, +0.67] | 0.139 |
 
-Valores com referência entre colchetes vêm da literatura (ver o plano); "(medido)" = avaliado aqui com o mesmo protocolo; "a medir" = ainda não avaliado.
+#### Checkpoints deste trabalho
 
-#### Tabela 15 — Ablações (MTEB-BR)
+| Checkpoint | MTEB-BR Mean22 [IC 95%] | dev nDCG@10 | Observação |
+|---|---|---|---|
+| R0 | 30.65 [20.79, 40.75] | — |  |
+| R0e | 28.36 [19.37, 37.57] | — |  |
+| C1 | 61.78 [53.61, 69.43] | 0.9740 |  |
+| C2 | 61.97 [53.83, 69.65] | 0.9767 |  |
+| C2-s2 | 61.71 [53.43, 69.50] | 0.9768 |  |
+| C2-s3 | 61.82 [53.64, 69.52] | 0.9764 |  |
+| C2-real | 61.74 [53.52, 69.44] | 0.9771 |  |
+| C2-syn | 61.14 [52.84, 68.99] | 0.9726 |  |
+| M-C | 62.41 [54.27, 70.14] | 0.9779 | = M-C-base0.75 |
+| lumi-emb | 62.41 [54.27, 70.14] | 0.9779 | = M-C (M-C-base0.75) |
+
+#### Grade do merge M-C (dev)
+
+| Candidato | dev nDCG@10 | Borda |  |
+|---|---|---|---|
+| M-C-base0.75 | 0.9779 | 21.0 | escolhido |
+| M-C-slerp-C2-real-C2-syn-t0.25 | 0.9778 | 25.5 |  |
+| C2-real | 0.9771 | 23.0 | melhor individual |
+| M-C-slerp-C2-real-C2-syn-t0.5 | 0.9770 | 21.0 |  |
+| C2-s2 | 0.9768 | 23.0 |  |
+| C2 | 0.9767 | 20.5 |  |
+| C2-s3 | 0.9764 | 16.0 |  |
+| M-C-avg | 0.9764 | 18.0 |  |
+| M-C-slerp-C2-real-C2-syn-t0.75 | 0.9741 | 10.0 |  |
+| M-C-base0.5 | 0.9739 | 11.0 |  |
+| C2-syn | 0.9726 | 9.0 |  |
+| M-C-base0.25 | 0.9608 | 0.0 |  |
+
+#### Variação entre sementes (C2)
+
+| Métrica | C2 | C2-s2 | C2-s3 | Média | Desvio-padrão |
+|---|---|---|---|---|---|
+| MTEB-BR Mean22 | 61.97 | 61.71 | 61.82 | 61.83 | 0.13 |
+| Classificação (4) | 66.64 | 66.79 | 66.66 | 66.70 | 0.08 |
+| Multilabel (1) | 29.62 | 29.84 | 29.22 | 29.56 | 0.31 |
+| Pares (2) | 84.56 | 84.55 | 84.26 | 84.46 | 0.17 |
+| STS (2) | 73.66 | 73.51 | 73.41 | 73.52 | 0.12 |
+| Clusterização (5) | 52.85 | 51.63 | 52.59 | 52.36 | 0.64 |
+| Retrieval (6) | 61.83 | 61.86 | 61.74 | 61.81 | 0.07 |
+| Reranking (2) | 57.71 | 57.63 | 57.72 | 57.69 | 0.05 |
+
+#### Ablações (MTEB-BR)
 
 | ID | Pergunta | Comparação | Δ Mean22 [IC 95%] | p | Tarefas |
 |---|---|---|---|---|---|
-| A1 | O estágio S1 é necessário? | C2 − C2-direct | — | — | 0 |
-| A2 | Dados reais (mesma escala) | C2 − C2-real | — | — | 0 |
-| A2 | Dados sintéticos (mesma escala) | C2 − C2-syn | — | — | 0 |
-| A3 | Sem negativos difíceis | C2 − C2-nohn | — | — | 0 |
-| A3 | Top-k ingênuo | C2 − C2-naivehn | — | — | 0 |
-| A4 | In-batch + máscara de falso negativo | C2 − C2-ib | — | — | 0 |
-| A5 | Bidirecional (atenção) | B2a − C2 | — | — | 0 |
-| A5 | Bidirecional (atenção + BiMamba) | B2f − C2 | — | — | 0 |
-| A7 | Echo embeddings sem treino | R0e − R0 | — | — | 0 |
-| A9 | Merge causal vs C2 | M-C − C2 | — | — | 0 |
-| A13 | Contexto longo | C3-long − C2 | — | — | 0 |
+| S2 | O S2 (negativos difíceis) melhora o C1? | C2 − C1 | +0.19 [-0.24, +0.64] | 0.394 | 22 |
+| A2 | Só dados reais no S2 | C2 − C2-real | +0.23 [-0.27, +0.68] | 0.349 | 22 |
+| A2 | Só dados sintéticos no S2 | C2 − C2-syn | +0.83 [+0.38, +1.36] | < 0.001 | 22 |
+| A2 | Reais contra sintéticos | C2-real − C2-syn | +0.60 [-0.17, +1.49] | 0.138 | 22 |
+| A7 | Echo embeddings sem treino | R0e − R0 | -2.30 [-4.54, -0.32] | 0.021 | 22 |
+| A9 | Merge causal vs C2 | M-C − C2 | +0.44 [-0.05, +0.90] | 0.074 | 22 |
 
+No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão na mesma escala, prevista no plano, fica para a fase de ablações.
+
+#### Hipóteses pré-registradas
+
+| ID | Hipótese | Teste | Δ [IC 95%] | p | Situação |
+|---|---|---|---|---|---|
+| H1 | Paridade prática com Transformers de porte similar | C2 − Qwen3-Embedding-4B | -3.56 [-6.60, -0.76] | 0.012 | Refutada |
+| H2 | O S1 melhora o resultado final | C2 − C2-direct | — | — | — |
+| H3 | Reais ajudam mais nas tarefas nativas | C2-real − C2-syn | +0.60 [-0.17, +1.49] | 0.138 | Não refutada |
+| H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
+| H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
+| H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
+| H7 | Vantagem relativa em entradas longas | C3-long (ou C2) − Qwen3-Embedding-4B, LongEmbed | — | — | — |
+
+"Refutada" / "Não refutada" aplicam o critério de falseamento do plano; "—" = ainda não executado.
 
 <!-- RESULTS:END -->
 
-### Hipóteses pré-registradas
+### Critérios de falseamento das hipóteses
+
+A situação de cada hipótese está na tabela "Hipóteses pré-registradas", acima.
 
 | ID | Hipótese | Como falsear |
 |---|---|---|
@@ -288,11 +318,15 @@ Valores com referência entre colchetes vêm da literatura (ver o plano); "(medi
 
 ## Limitações
 
-- **Contexto:** o contexto validado vai só até o comprimento treinado (512 tokens; 8k no C3-long). Na Etapa 1, o backbone colapsou na geração a partir de 64k.
+- **Clusterização e STS:** é onde está a maior distância para o Qwen3-Embedding-4B; só a clusterização responde por 2,7 dos 3,1 pontos da diferença média. A mistura de treino tem quase só pares de busca e de frases semelhantes, sem dados que ensinem "mesmo tema", e o treino quase não moveu a clusterização.
+- **Contexto:** o contexto validado vai só até o comprimento treinado (512 tokens). Na Etapa 1, o backbone colapsou na geração a partir de 64k.
 - **Arquitetura:** o embedder híbrido Mamba-Transformer não tem validação prévia na literatura, e o trilho bidirecional é experimental.
 - **Retrieval em inglês:** é onde modelos recorrentes mostraram a maior lacuna. É monitorado à parte, no MTEB eng v2.
 - **Dependência do teacher:** os negativos e o filtro dos sintéticos vêm do Qwen3-Embedding-4B.
 - **Escala reduzida:** centenas de milhares de pares, contra dezenas de milhões na literatura.
+- **Dev saturado:** o dev (1.500 consultas, com 30 mil distratores fixos) fica perto de 0,977 nos candidatos ao merge. As diferenças entre eles são de milésimos, perto da variação entre sementes (0,0004 de amplitude). Ele serve para descartar candidatos ruins, mas separa pouco os bons.
+- **Contaminação residual:** ver a auditoria posterior, na seção Dados.
+- **Ablação A2 em escalas diferentes:** S2-real (91 mil exemplos, dos quais só 22,5 mil em PT nativo; o resto é mMARCO traduzido e bitexto) e S2-syn (74 mil) não têm o tamanho do S2 (120 mil).
 - **Licença pendente (D2):** o mMARCO é de uso não comercial, e o `lumi-4b` ainda não declara licença.
 
 ## Reprodução
