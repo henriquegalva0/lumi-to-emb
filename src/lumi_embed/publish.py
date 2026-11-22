@@ -31,6 +31,9 @@ def _api():
     return HfApi(token=token)
 
 
+WEIGHT_PATTERNS = ["*.safetensors", "*.safetensors.index.json", "*.bin", "*.bin.index.json", "meta.json"]
+
+
 def _ensure_repo(api, repo: str) -> None:
     """Cria o repositório do modelo como privado se ele não existir; não muda a visibilidade de um existente."""
     api.create_repo(repo_id=repo, repo_type="model", private=True, exist_ok=True)
@@ -75,8 +78,11 @@ def publish_checkpoint(repo: str, ckpt_id: str, release: bool = False) -> str:
     if not release:
         api.create_branch(repo_id=repo, branch=ckpt_id, repo_type="model", exist_ok=True)
     msg = f"{'Release' if release else 'Checkpoint'} {ckpt_id} (código {git_commit()['commit'][:7]})"
+    # Um branch novo nasce do main: sem apagar, pesos de outro checkpoint (shards com outros nomes)
+    # ficariam no branch. delete_patterns apaga no mesmo commit; os arquivos enviados não são apagados.
     info = api.upload_folder(repo_id=repo, folder_path=str(folder), repo_type="model", revision=revision,
-                             commit_message=msg, ignore_patterns=["*.tmp", "train_state/*"])
+                             commit_message=msg, ignore_patterns=["*.tmp", "train_state/*"],
+                             delete_patterns=WEIGHT_PATTERNS)
     if release:
         push_card(repo, f"Model card da release {ckpt_id}")
     log.info("%s publicado em %s@%s", ckpt_id, repo, revision)

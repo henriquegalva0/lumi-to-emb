@@ -163,6 +163,8 @@ def test_publish_creates_private_repo_branch_and_card(tmp_path, monkeypatch):
         def upload_folder(self, **kw):
             names = sorted(p.name for p in Path(kw["folder_path"]).iterdir())
             calls.append(("upload", kw["revision"], names))
+            if "README.md" not in names:   # pesos: apaga os antigos do branch no mesmo commit
+                assert "*.safetensors" in kw["delete_patterns"]
             return "ok"
 
     monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(HfApi=FakeApi))
