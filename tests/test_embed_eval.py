@@ -47,15 +47,52 @@ def test_report_only_uses_result_files(tmp_path, monkeypatch):
     md = rep.build_report({})
     t12 = md.split("## Tabela 12")[1].split("## Tabela 13")[0]
     rows = {line.split("|")[1].strip(): line for line in t12.splitlines() if line.startswith("| ")}
-    assert "0.6105 [" in rows["C2"]           # média das 22 tarefas, com IC
+    assert "61.05 [" in rows["C2"]            # média das 22 tarefas (× 100), com IC
     assert rows["R0"].split("|")[2].strip() == "—"   # sem as 22 tarefas, não há Mean22
     assert rows["C1"].count("—") >= 8          # sem resultados: tudo "—"
     a1 = next(line for line in md.splitlines() if line.startswith("| A1 "))
-    assert "+0.0500" in a1 and "| 22 |" in a1
-    assert "0,6621 [16]" in md                 # literatura com referência
+    assert "+5.00" in a1 and "| 22 |" in a1
+    assert "66.21 [16]" in md                  # literatura com referência
     out = (tmp_path / "docs" / "huggingface" / "README.md").read_text()
-    assert "velho" not in out and "Tabela 12" in out and out.startswith("antes") and out.endswith("depois\n")
+    assert "velho" not in out and "MTEB-BR (22 tarefas" in out and out.startswith("antes") and out.endswith("depois\n")
+    assert "| C2-nohn |" not in out            # no card, só linhas com resultado
     assert (tmp_path / "results/embed/tables/table13b_mteb_br_tasks.csv").exists()
+
+
+def test_report_release_seeds_and_hypotheses(tmp_path, monkeypatch):
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    monkeypatch.setattr(rep, "REPO_ROOT", tmp_path)
+    (tmp_path / "docs" / "huggingface").mkdir(parents=True)
+    (tmp_path / "docs" / "huggingface" / "README.md").write_text("<!-- RESULTS:START -->\n<!-- RESULTS:END -->\n")
+    cache = tmp_path / "results" / "embed" / "mteb"
+    base = {"C2": 0.60, "C2-s2": 0.602, "C2-s3": 0.598, "C2-real": 0.60, "C2-syn": 0.59, "lumi-emb": 0.61}
+    for i, t in enumerate(rep.MTEB_BR_TASKS):
+        for m, v in base.items():
+            _write_result(cache, f"lumi-embed/{m}", t, v + 0.001 * i)
+        _write_result(cache, rep.QWEN4B, t, 0.65 + 0.001 * i)
+    rel = tmp_path / "checkpoints" / "lumi-emb"
+    rel.mkdir(parents=True)
+    (rel / "choice.json").write_text(json.dumps({"source": "M-C", "merge_selected_variant": "M-C-base0.75",
+                                                 "rule": "regra"}))
+    mc = tmp_path / "checkpoints" / "M-C"
+    mc.mkdir(parents=True)
+    (mc / "merge_report.json").write_text(json.dumps({
+        "selected": "M-C-base0.75", "best_individual": "C2-real",
+        "dev": {"M-C-base0.75": {"mean_ndcg@10": 0.9779}, "C2-real": {"mean_ndcg@10": 0.9771}}}))
+    md = rep.build_report({})
+    t12 = md.split("## Tabela 12")[1].split("## Tabela 13")[0]
+    rows = {line.split("|")[1].strip(): line for line in t12.splitlines() if line.startswith("| ")}
+    assert "62.05 [" in rows["M-C"]            # a origem do lumi-emb herda as notas (mesmos pesos)
+    seeds = md.split("## Variação entre sementes")[1].split("##")[0]
+    assert "| MTEB-BR Mean22 | 61.05 | 61.25 | 60.85 | 61.05 | 0.20 |" in seeds
+    hyp = {line.split("|")[1].strip(): line for line in md.split("## Hipóteses")[1].splitlines()
+           if line.startswith("| H")}
+    assert "Refutada" in hyp["H1"] and "-5.00" in hyp["H1"]   # C2 abaixo do Qwen3-4B com IC todo negativo
+    assert "Não refutada" in hyp["H3"]                          # reais > sintéticos
+    assert "Não refutada" in hyp["H6"] and "+0.08" in hyp["H6"]  # dev: merge > melhor individual
+    assert hyp["H2"].rstrip().endswith("| — |")                 # C2-direct não rodou
+    pair = next(line for line in md.splitlines() if line.startswith("| lumi-emb − Qwen3-Embedding-4B"))
+    assert "-4.00" in pair and "0/22" in pair
 
 
 def test_instruction_resolution():

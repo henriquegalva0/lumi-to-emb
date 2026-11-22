@@ -2,11 +2,14 @@
 
 Regra A.3: nenhuma célula do Lumi-Embed é preenchida sem um JSON de resultado correspondente;
 células sem resultado ficam "—". Os únicos números digitados aqui são valores da literatura
-já presentes no plano, sempre com a referência entre colchetes.
+já presentes no plano, sempre com a referência entre colchetes. Notas × 100.
 
-Saídas: results/embed/tables/*.csv e docs/embed/RESULTS.md; o bloco entre os marcadores
-<!-- RESULTS:START --> e <!-- RESULTS:END --> do model card (docs/huggingface/README.md) é
-regenerado.
+Saídas: results/embed/tables/*.csv, docs/embed/RESULTS.md (completo) e, no model card
+(docs/huggingface/README.md), o bloco entre <!-- RESULTS:START --> e <!-- RESULTS:END -->,
+regenerado numa versão resumida (só linhas com resultado).
+
+O lumi-emb é uma cópia de um checkpoint (checkpoints/lumi-emb/choice.json). Ele é avaliado com o
+próprio nome; a origem (ex.: M-C) recebe as mesmas notas, porque os pesos são os mesmos.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import csv
 import json
 import logging
 import math
+import statistics
 from pathlib import Path
 
 from ..utils import REPO_ROOT, ckpt_dir, results_dir, wpath
@@ -23,8 +27,9 @@ from .stats import bootstrap_mean, load_scores, paired_bootstrap
 
 log = logging.getLogger("lumi_embed.report")
 
-CHECKPOINTS = ["R0", "R0e", "R1", "C1", "C2", "C2-real", "C2-syn", "C2-nohn", "C2-naivehn", "C2-ib", "C2-direct",
-               "C3-long", "B2a", "B2f", "M-C", "M-B", "lumi-emb"]
+CHECKPOINTS = ["R0", "R0e", "R1", "C1", "C2", "C2-s2", "C2-s3", "C2-real", "C2-syn", "C2-nohn", "C2-naivehn",
+               "C2-ib", "C2-direct", "C3-long", "B2a", "B2f", "M-C", "M-B", "lumi-emb"]
+SEEDS = ["C2", "C2-s2", "C2-s3"]  # mesma receita, sementes 1–3: variação entre execuções
 MTEB_BR_CATEGORIES = {
     "Classificação (4)": ["HateBR", "ToxSynPT", "FactckBrClassification", "PortuLexRRIP"],
     "Multilabel (1)": ["BrighterEmotionMultilabelClassification"],
@@ -43,10 +48,13 @@ MTEB_PT_FAMILIES = {
     "PT Ret": ["MultiLongDocRetrieval", "WikipediaRetrievalMultilingual", "WebFAQRetrieval"],
     "PT Rer": ["MultiLongDocReranking", "WikipediaRerankingMultilingual", "XGlueWPRReranking"],
 }
+EXTRA_SUITES = {"mmteb": "MMTEB", "eng_v2": "MTEB eng v2", "longembed": "LongEmbed"}
 ABLATIONS = [
     ("A1", "O estágio S1 é necessário?", "C2", "C2-direct"),
-    ("A2", "Dados reais (mesma escala)", "C2", "C2-real"),
-    ("A2", "Dados sintéticos (mesma escala)", "C2", "C2-syn"),
+    ("S2", "O S2 (negativos difíceis) melhora o C1?", "C2", "C1"),
+    ("A2", "Só dados reais no S2", "C2", "C2-real"),
+    ("A2", "Só dados sintéticos no S2", "C2", "C2-syn"),
+    ("A2", "Reais contra sintéticos", "C2-real", "C2-syn"),
     ("A3", "Sem negativos difíceis", "C2", "C2-nohn"),
     ("A3", "Top-k ingênuo", "C2", "C2-naivehn"),
     ("A4", "In-batch + máscara de falso negativo", "C2", "C2-ib"),
@@ -56,45 +64,80 @@ ABLATIONS = [
     ("A9", "Merge causal vs C2", "M-C", "C2"),
     ("A13", "Contexto longo", "C3-long", "C2"),
 ]
-# Valores da literatura reproduzidos do plano (Tabelas 8–10 e 14), com a fonte.
+QWEN4B = "Qwen/Qwen3-Embedding-4B"
+# Valores da literatura reproduzidos do plano (Tabelas 8–10 e 14), com a fonte (× 100).
 LITERATURE = [
-    {"model": "Qwen3-Embedding-4B", "rel": "Mesmo porte, Transformer, líder aberto em PT", "mteb_br": "0,6621 [16]",
-     "mteb_pt": "a medir", "mmteb": "a medir", "longembed": "a medir", "hf": "Qwen/Qwen3-Embedding-4B"},
-    {"model": "Qwen3-Embedding-8B", "rel": "Líder aberto no MTEB-BR", "mteb_br": "0,6704 [16]", "mteb_pt": "a medir",
-     "mmteb": "70,58 [10]", "longembed": "a medir", "hf": "Qwen/Qwen3-Embedding-8B"},
+    {"model": "Qwen3-Embedding-4B", "rel": "Mesmo porte, Transformer, líder aberto em PT", "mteb_br": "66.21 [16]",
+     "mteb_pt": "a medir", "mmteb": "a medir", "longembed": "a medir", "hf": QWEN4B},
+    {"model": "Qwen3-Embedding-8B", "rel": "Líder aberto no MTEB-BR", "mteb_br": "67.04 [16]", "mteb_pt": "a medir",
+     "mmteb": "70.58 [10]", "longembed": "a medir", "hf": "Qwen/Qwen3-Embedding-8B"},
     {"model": "Qwen3-Embedding-0.6B", "rel": "Baseline pequeno", "mteb_br": "a medir",
-     "mteb_pt": "80,7 / 52,3 / 78,9 / 85,8 [17]", "mmteb": "64,33 [9]", "longembed": "a medir",
+     "mteb_pt": "80.7 / 52.3 / 78.9 / 85.8 [17]", "mmteb": "64.33 [9]", "longembed": "a medir",
      "hf": "Qwen/Qwen3-Embedding-0.6B"},
     {"model": "multilingual-e5-large-instruct", "rel": "Baseline multilíngue clássico", "mteb_br": "a medir",
-     "mteb_pt": "81,3 / 53,0 / 70,1 / 84,5 [17]", "mmteb": "a medir", "longembed": "a medir",
+     "mteb_pt": "81.3 / 53.0 / 70.1 / 84.5 [17]", "mmteb": "a medir", "longembed": "a medir",
      "hf": "intfloat/multilingual-e5-large-instruct"},
     {"model": "gte-multilingual-base", "rel": "Baseline multilíngue", "mteb_br": "a medir",
-     "mteb_pt": "80,4 / 50,2 / 76,9 / 84,2 [17]", "mmteb": "a medir", "longembed": "a medir",
+     "mteb_pt": "80.4 / 50.2 / 76.9 / 84.2 [17]", "mmteb": "a medir", "longembed": "a medir",
      "hf": "Alibaba-NLP/gte-multilingual-base"},
     {"model": "llama-embed-nemotron-8b", "rel": "Mesma família NVIDIA; receita aberta", "mteb_br": "a medir",
-     "mteb_pt": "a medir", "mmteb": "69,46 [10]", "longembed": "a medir", "hf": "nvidia/llama-embed-nemotron-8b"},
+     "mteb_pt": "a medir", "mmteb": "69.46 [10]", "longembed": "a medir", "hf": "nvidia/llama-embed-nemotron-8b"},
     {"model": "Mamba2 1.3B / Codestral Mamba2 7B", "rel": "Recorrentes puros", "mteb_br": "—", "mteb_pt": "—",
-     "mmteb": "55,2 / 59,4 (eixo tarefa) [5]", "longembed": "40,8 / 44,5 [5]", "hf": None},
+     "mmteb": "55.2 / 59.4 (eixo tarefa) [5]", "longembed": "40.8 / 44.5 [5]", "hf": None},
 ]
+BASELINE_NAMES = {m["hf"]: m["model"] for m in LITERATURE if m["hf"]}
+A2_NOTE = ("No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 "
+           "completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão "
+           "na mesma escala, prevista no plano, fica para a fase de ablações.")
+RESULTS_URL = "https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/RESULTS.md"
+NA = {"n": 0}
 
 
-def _fmt(x, pct: bool = False) -> str:
+# ---------------------------------------------------------------- formatação e médias
+def _pct(x, nd: int = 2) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return "—"
-    return f"{100 * x:.2f}" if pct else f"{x:.4f}"
+    return f"{100 * x:.{nd}f}"
 
 
 def _ci(b: dict) -> str:
     if not b or b.get("n", 0) == 0:
         return "—"
-    return f"{b['mean']:.4f} [{b['lo']:.4f}, {b['hi']:.4f}]"
+    return f"{100 * b['mean']:.2f} [{100 * b['lo']:.2f}, {100 * b['hi']:.2f}]"
 
 
-def _mean(scores: dict, tasks: list[str], require_all: bool = True):
+def _delta(r: dict) -> str:
+    return "—" if r.get("n", 0) == 0 else f"{100 * r['delta']:+.2f} [{100 * r['lo']:+.2f}, {100 * r['hi']:+.2f}]"
+
+
+def _p(r: dict) -> str:
+    if r.get("n", 0) == 0:
+        return "—"
+    return "< 0.001" if r["p"] < 0.001 else f"{r['p']:.3f}"
+
+
+def _mean(scores: dict, tasks: list[str] | None, require_all: bool = True):
+    if not tasks:
+        return None
     vals = [scores[t] for t in tasks if t in scores]
     if not vals or (require_all and len(vals) < len(tasks)):
         return None
     return sum(vals) / len(vals)
+
+
+def _complete(s: dict) -> bool:
+    return all(t in s for t in MTEB_BR_TASKS)
+
+
+def _mean22(s: dict) -> dict:
+    return bootstrap_mean([s[t] for t in MTEB_BR_TASKS]) if _complete(s) else NA
+
+
+def _paired(a: dict, b: dict) -> dict:
+    """Bootstrap pareado nas 22 tarefas do MTEB-BR; só com as 22 dos dois lados."""
+    if not (_complete(a) and _complete(b)):
+        return NA
+    return paired_bootstrap({t: a[t] for t in MTEB_BR_TASKS}, {t: b[t] for t in MTEB_BR_TASKS})
 
 
 def _table(headers: list[str], rows: list[list]) -> str:
@@ -111,115 +154,288 @@ def _write_csv(path: Path, headers: list[str], rows: list[list]) -> None:
         w.writerows(rows)
 
 
+def _json(path: Path) -> dict:
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _filled(row: list, first: int = 1) -> bool:
+    return any(c not in ("—", "", None) for c in row[first:])
+
+
+# ---------------------------------------------------------------- coleta
 def collect(extra_models: list[str] | None = None) -> dict[str, dict]:
+    """{checkpoint ou hf_id: {tarefa: nota}}; a origem do lumi-emb herda as notas dele (mesmos pesos)."""
     cache = results_dir("mteb")
-    all_scores = {c: load_scores(cache, model_name(c)) for c in CHECKPOINTS}
+    S = {c: load_scores(cache, model_name(c)) for c in CHECKPOINTS}
     for m in extra_models or []:
-        all_scores[m] = load_scores(cache, m)
-    return all_scores
+        S[m] = load_scores(cache, m)
+    src = release_info().get("source")
+    if src in S and src != "lumi-emb":
+        if S["lumi-emb"] and not S[src]:
+            S[src] = S["lumi-emb"]
+        elif S[src] and not S["lumi-emb"]:
+            S["lumi-emb"] = S[src]
+    return S
 
 
-def build_report(ecfg: dict) -> str:
-    baselines = [m["hf"] for m in LITERATURE if m["hf"]]
-    S = collect(baselines)
-    tables = results_dir("tables")
-    md = ["# Lumi-Embed — resultados\n",
-          "Gerado por `lumi_embed report` a partir de `results/embed/`. Células \"—\" = sem resultado ainda. "
-          "IC 95 % por bootstrap sobre tarefas; p-valores por bootstrap pareado (unidade = tarefa), como no "
-          "MTEB-BR [16].\n"]
+def release_info() -> dict:
+    return _json(ckpt_dir("lumi-emb") / "choice.json")
 
-    # Tabela 12 — visão geral (listas de tarefas gravadas pela própria avaliação)
+
+def suite_lists() -> dict[str, list[str]]:
     lists = {}
-    for suite in ("mmteb", "eng_v2", "longembed"):
+    for suite in EXTRA_SUITES:
         f = results_dir("suites", f"{suite}.json")
         if f.exists():
             lists[suite] = json.loads(f.read_text())
-    h12 = ["Checkpoint", "MTEB-BR Mean22 [IC 95%]", "PT STS", "PT Cls", "PT Ret", "PT Rer", "MMTEB", "MTEB eng v2",
-           "LongEmbed"]
+    return lists
+
+
+def dev_info(c: str) -> dict:
+    return _json(ckpt_dir(c) / "summary.json")
+
+
+# ---------------------------------------------------------------- seções
+def seed_table(S: dict) -> tuple[list[str], list[list]]:
+    done = [c for c in SEEDS if _complete(S[c])]
+    if len(done) < 2:
+        return [], []
+    rows = []
+    metrics = [("MTEB-BR Mean22", MTEB_BR_TASKS)] + list(MTEB_BR_CATEGORIES.items()) + list(MTEB_PT_FAMILIES.items())
+    for name, ts in metrics:
+        vals = [_mean(S[c], ts) for c in done]
+        if any(v is None for v in vals):
+            continue
+        rows.append([name] + [_pct(v) for v in vals] + [_pct(statistics.mean(vals)), _pct(statistics.stdev(vals))])
+    return ["Métrica"] + done + ["Média", "Desvio-padrão"], rows
+
+
+def hypotheses(S: dict, lists: dict) -> list[list]:
+    """Situação das hipóteses pelo critério de falseamento pré-registrado (tabela do model card)."""
+    def verdict(r: dict, refuted: bool) -> str:
+        return "—" if r.get("n", 0) == 0 else ("Refutada" if refuted else "Não refutada")
+
+    rows = []
+    r = _paired(S["C2"], S.get(QWEN4B, {}))
+    rows.append(["H1", "Paridade prática com Transformers de porte similar", "C2 − Qwen3-Embedding-4B",
+                 _delta(r), _p(r), verdict(r, r.get("hi", 0) < 0)])
+    r = _paired(S["C2"], S["C2-direct"])
+    rows.append(["H2", "O S1 melhora o resultado final", "C2 − C2-direct", _delta(r), _p(r),
+                 verdict(r, r.get("delta", 0) <= 0)])
+    r = _paired(S["C2-real"], S["C2-syn"])
+    rows.append(["H3", "Reais ajudam mais nas tarefas nativas", "C2-real − C2-syn", _delta(r), _p(r),
+                 verdict(r, r.get("delta", 0) <= 0)])
+    r = _paired(S["C2"], S["C2-naivehn"])
+    rows.append(["H4", "Negativos positive-aware superam o top-k ingênuo", "C2 − C2-naivehn", _delta(r), _p(r),
+                 verdict(r, r.get("delta", 0) <= 0)])
+    ra, rf, rbf = _paired(S["B2a"], S["C2"]), _paired(S["B2f"], S["C2"]), _paired(S["B2f"], S["B2a"])
+    h5 = NA if 0 in (ra.get("n", 0), rf.get("n", 0)) else rbf
+    rows.append(["H5", "O bidirecional melhora a média", "B2a − C2; B2f − C2", f"{_delta(ra)}; {_delta(rf)}",
+                 "—", verdict(h5, h5.get("delta", 0) <= 0 or (ra.get("delta", 0) <= 0 and rf.get("delta", 0) <= 0))])
+    rep = _json(ckpt_dir("M-C") / "merge_report.json")
+    if rep:
+        best = rep["best_individual"]
+        dm, db = rep["dev"][rep["selected"]]["mean_ndcg@10"], rep["dev"][best]["mean_ndcg@10"]
+        rows.append(["H6", "O merge supera o melhor checkpoint individual (dev)",
+                     f"M-C ({rep['selected']}) − {best}, nDCG@10 no dev", f"{100 * (dm - db):+.2f}", "—",
+                     "Refutada" if dm <= db else "Não refutada"])
+    else:
+        rows.append(["H6", "O merge supera o melhor checkpoint individual (dev)", "M-C − melhor individual",
+                     "—", "—", "—"])
+    le = lists.get("longembed")
+    ours = next((v for v in (_mean(S[c], le) for c in ("C3-long", "C2")) if v is not None), None)
+    theirs = _mean(S.get(QWEN4B, {}), le)
+    ok = ours is not None and theirs is not None
+    rows.append(["H7", "Vantagem relativa em entradas longas", "C3-long (ou C2) − Qwen3-Embedding-4B, LongEmbed",
+                 f"{100 * (ours - theirs):+.2f}" if ok else "—", "—",
+                 ("Refutada" if ours < theirs else "Não refutada") if ok else "—"])
+    return rows
+
+
+# ---------------------------------------------------------------- relatório completo
+def build_report(ecfg: dict) -> str:
+    baselines = [m["hf"] for m in LITERATURE if m["hf"]]
+    S = collect(baselines)
+    lists = suite_lists()
+    rel = release_info()
+    measured = [b for b in baselines if _complete(S[b])]
+    tables = results_dir("tables")
+    md = ["# Lumi-Embed — resultados\n",
+          "Gerado por `lumi_embed report` a partir de `results/embed/`. Notas × 100. Células \"—\" = sem "
+          "resultado ainda. IC 95 % por bootstrap sobre tarefas; p-valores por bootstrap pareado (unidade = "
+          "tarefa), como no MTEB-BR [16]. Mesmo protocolo para todos os modelos: mesmas instruções em português "
+          "(só na query) e comprimento máximo de 512 tokens.\n"]
+    if rel:
+        md.append(f"O **lumi-emb** é o checkpoint `{rel.get('source')}` "
+                  f"({rel.get('merge_selected_variant')}), escolhido no dev pela regra: {rel.get('rule')}\n")
+
+    # Tabela 12 — visão geral
+    h12 = ["Modelo", "MTEB-BR Mean22 [IC 95%]"] + list(MTEB_PT_FAMILIES) + list(EXTRA_SUITES.values())
     rows12 = []
-    for c in CHECKPOINTS:
+    for c in CHECKPOINTS + measured:
         s = S[c]
-        br = [s[t] for t in MTEB_BR_TASKS if t in s]
-        mean22 = bootstrap_mean(br) if len(br) == len(MTEB_BR_TASKS) else {"n": 0}
-        rows12.append([c, _ci(mean22)] + [_fmt(_mean(s, ts)) for ts in MTEB_PT_FAMILIES.values()]
-                      + [_fmt(_mean(s, lists.get(k))) if lists.get(k) else "—" for k in ("mmteb", "eng_v2", "longembed")])
+        rows12.append([BASELINE_NAMES.get(c, c), _ci(_mean22(s))] + [_pct(_mean(s, ts)) for ts in MTEB_PT_FAMILIES.values()]
+                      + [_pct(_mean(s, lists.get(k))) for k in EXTRA_SUITES])
     _write_csv(tables / "table12_overview.csv", h12, rows12)
     md += ["## Tabela 12 — Visão geral\n", _table(h12, rows12), ""]
 
     # Tabela 13 — MTEB-BR por categoria
-    h13 = ["Checkpoint"] + list(MTEB_BR_CATEGORIES)
-    rows13 = [[c] + [_fmt(_mean(S[c], ts)) for ts in MTEB_BR_CATEGORIES.values()] for c in CHECKPOINTS]
+    h13 = ["Modelo"] + list(MTEB_BR_CATEGORIES)
+    rows13 = [[BASELINE_NAMES.get(c, c)] + [_pct(_mean(S[c], ts)) for ts in MTEB_BR_CATEGORIES.values()]
+              for c in CHECKPOINTS + measured]
     _write_csv(tables / "table13_mteb_br_categories.csv", h13, rows13)
     md += ["## Tabela 13 — MTEB-BR por categoria\n", _table(h13, rows13), ""]
 
-    # Tabela 13b — por tarefa (CSV completo; no markdown, só alguns checkpoints)
-    h13b = ["Tarefa"] + CHECKPOINTS
-    rows13b = [[t] + [_fmt(S[c].get(t)) for c in CHECKPOINTS] for t in MTEB_BR_TASKS]
-    _write_csv(tables / "table13b_mteb_br_tasks.csv", h13b, rows13b)
-    keep = ["R0", "R1", "C2", "B2a", "B2f", "M-C", "M-B", "lumi-emb"]
+    # Tabela 13b — por tarefa (CSV completo; no markdown, uma seleção)
+    cols = CHECKPOINTS + measured
+    _write_csv(tables / "table13b_mteb_br_tasks.csv", ["Tarefa"] + [BASELINE_NAMES.get(c, c) for c in cols],
+               [[t] + [_pct(S[c].get(t)) for c in cols] for t in MTEB_BR_TASKS])
+    keep = ["R0", "C1", "C2", "C2-real", "C2-syn", "lumi-emb"] + ([QWEN4B] if QWEN4B in measured else [])
     md += ["## Tabela 13b — MTEB-BR por tarefa (seleção; completo em CSV)\n",
-           _table(["Tarefa"] + keep, [[t] + [_fmt(S[c].get(t)) for c in keep] for t in MTEB_BR_TASKS]), ""]
+           _table(["Tarefa"] + [BASELINE_NAMES.get(c, c) for c in keep],
+                  [[t] + [_pct(S[c].get(t)) for c in keep] for t in MTEB_BR_TASKS]), ""]
+
+    # Variação entre sementes
+    hs, rs = seed_table(S)
+    if rs:
+        _write_csv(tables / "seeds.csv", hs, rs)
+        md += ["## Variação entre sementes (C2)\n", _table(hs, rs),
+               "\nMesma receita e mesmos dados; muda só a semente. Diferenças entre checkpoints menores que cerca "
+               "de 2 desvios-padrão não se distinguem da variação entre execuções.\n"]
 
     # Tabela 14 — comparação com modelos correspondentes
     h14 = ["Modelo", "Relação com o lumi-emb", "MTEB-BR Mean22", "MTEB-PT (STS/Cls/Ret/Rer)", "MMTEB", "LongEmbed"]
     rows14 = []
     for c in ("lumi-emb", "R0"):
         s = S[c]
-        fam = " / ".join(_fmt(_mean(s, ts), pct=True) for ts in MTEB_PT_FAMILIES.values())
         rows14.append([f"{c} (este trabalho)", "—" if c == "lumi-emb" else "Ponto de partida",
-                       _fmt(_mean(s, MTEB_BR_TASKS)), fam, "—", "—"])
+                       _pct(_mean(s, MTEB_BR_TASKS)), " / ".join(_pct(_mean(s, ts), 1) for ts in MTEB_PT_FAMILIES.values()),
+                       _pct(_mean(s, lists.get("mmteb"))), _pct(_mean(s, lists.get("longembed")))])
     for m in LITERATURE:
         s = S.get(m["hf"], {}) if m["hf"] else {}
-        measured_br = _mean(s, MTEB_BR_TASKS)
-        measured_pt = [_mean(s, ts) for ts in MTEB_PT_FAMILIES.values()]
-        br = m["mteb_br"] if measured_br is None else f"{measured_br:.4f} (medido)"
-        pt = m["mteb_pt"] if all(v is None for v in measured_pt) else " / ".join(
-            _fmt(v, pct=True) for v in measured_pt) + " (medido)"
-        rows14.append([m["model"], m["rel"], br, pt, m["mmteb"], m["longembed"]])
+        mbr, mpt = _mean(s, MTEB_BR_TASKS), [_mean(s, ts) for ts in MTEB_PT_FAMILIES.values()]
+        mmt, mle = _mean(s, lists.get("mmteb")), _mean(s, lists.get("longembed"))
+        rows14.append([m["model"], m["rel"],
+                       m["mteb_br"] if mbr is None else f"{_pct(mbr)} (medido)",
+                       m["mteb_pt"] if all(v is None for v in mpt) else " / ".join(_pct(v, 1) for v in mpt) + " (medido)",
+                       m["mmteb"] if mmt is None else f"{_pct(mmt)} (medido)",
+                       m["longembed"] if mle is None else f"{_pct(mle)} (medido)"])
     _write_csv(tables / "table14_comparison.csv", h14, rows14)
     md += ["## Tabela 14 — Comparação com modelos correspondentes\n", _table(h14, rows14),
            "\nValores com referência entre colchetes vêm da literatura (ver o plano); \"(medido)\" = avaliado aqui "
            "com o mesmo protocolo; \"a medir\" = ainda não avaliado.\n"]
 
-    # Tabela 15 — ablações (Δ no MTEB-BR, bootstrap pareado sobre as tarefas)
+    # Tabela 14b — comparação pareada no MTEB-BR
+    pairs = [("lumi-emb", b) for b in measured] + ([("C2", QWEN4B)] if QWEN4B in measured else [])
+    h14b = ["Comparação", "Δ Mean22 [IC 95%]", "p", "Vitórias (tarefas)"]
+    rows14b = []
+    for a, b in pairs:
+        r = _paired(S[a], S[b])
+        wins = sum(S[a][t] > S[b][t] for t in MTEB_BR_TASKS) if r.get("n") else None
+        rows14b.append([f"{a} − {BASELINE_NAMES.get(b, b)}", _delta(r), _p(r),
+                        "—" if wins is None else f"{wins}/{len(MTEB_BR_TASKS)}"])
+    if rows14b:
+        _write_csv(tables / "table14b_paired.csv", h14b, rows14b)
+        md += ["## Tabela 14b — Comparação pareada no MTEB-BR\n", _table(h14b, rows14b), ""]
+
+    # Tabela 15 — ablações
     h15 = ["ID", "Pergunta", "Comparação", "Δ Mean22 [IC 95%]", "p", "Tarefas"]
     rows15 = []
     for aid, q, a, b in ABLATIONS:
-        sa = {t: v for t, v in S[a].items() if t in MTEB_BR_TASKS}
-        sb = {t: v for t, v in S[b].items() if t in MTEB_BR_TASKS}
-        r = paired_bootstrap(sa, sb)
-        cell = "—" if r["n"] == 0 else f"{r['delta']:+.4f} [{r['lo']:+.4f}, {r['hi']:+.4f}]"
-        rows15.append([aid, q, f"{a} − {b}", cell, "—" if r["n"] == 0 else f"{r['p']:.3f}", r["n"]])
+        r = _paired(S[a], S[b])
+        rows15.append([aid, q, f"{a} − {b}", _delta(r), _p(r), r.get("n", 0)])
     _write_csv(tables / "table15_ablations.csv", h15, rows15)
-    md += ["## Tabela 15 — Ablações (MTEB-BR)\n", _table(h15, rows15), ""]
+    md += ["## Tabela 15 — Ablações (MTEB-BR)\n", _table(h15, rows15),
+           f"\n{A2_NOTE}\n"]
 
-    # Dev (seleção de checkpoints e merges)
-    hdev, rdev = ["Checkpoint", "dev nDCG@10 médio", "Passos", "Minutos de treino"], []
+    # Hipóteses
+    hh = ["ID", "Hipótese", "Teste", "Δ [IC 95%]", "p", "Situação"]
+    rh = hypotheses(S, lists)
+    _write_csv(tables / "hypotheses.csv", hh, rh)
+    md += ["## Hipóteses pré-registradas: situação\n", _table(hh, rh),
+           "\n\"Refutada\" / \"Não refutada\" aplicam o critério de falseamento do plano; \"—\" = falta executar. "
+           "H6 usa o dev (critério do plano), sem IC.\n"]
+
+    # Dev
+    hdev, rdev = ["Checkpoint", "dev nDCG@10 médio", "Passos", "Minutos de treino", "Observação"], []
     for c in CHECKPOINTS:
-        f = ckpt_dir(c) / "summary.json"
-        if f.exists():
-            js = json.loads(f.read_text())
-            rdev.append([c, _fmt((js.get("dev") or {}).get("mean_ndcg@10")), js.get("steps", "—"),
-                         js.get("train_minutes", "—")])
+        js = dev_info(c)
+        if not js:
+            continue
+        note = ""
+        if c == "lumi-emb" and rel:
+            note = f"= {rel.get('source')} ({rel.get('merge_selected_variant')})"
+        elif js.get("selected"):
+            note = f"= {js['selected']}"
+        rdev.append([c, f"{(js.get('dev') or {}).get('mean_ndcg@10', float('nan')):.4f}",
+                     js.get("steps", "—"), js.get("train_minutes", "—"), note])
     if rdev:
         md += ["## Dev set (seleção de checkpoints)\n", _table(hdev, rdev), ""]
+
     text = "\n".join(md) + "\n"
     out = REPO_ROOT / "docs" / "embed" / "RESULTS.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     (wpath("results", "embed", "RESULTS.md")).write_text(text, encoding="utf-8")
-    update_card_block(text)
+    update_card_block(card_block(S, lists, measured, rows14b, rs and (hs, rs), rows15, rh, rdev))
     return text
 
 
-def update_card_block(results_md: str) -> None:
+# ---------------------------------------------------------------- bloco do model card
+def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev) -> str:
+    """Versão resumida para o model card: só linhas com resultado; o completo fica no RESULTS.md."""
+    md = ["### Resultados\n",
+          f"Notas × 100, geradas pelos arquivos de avaliação ([tabelas completas]({RESULTS_URL})). Mesmo protocolo "
+          "para todos os modelos: mesmas instruções em português, só na query, e até 512 tokens. IC 95 % e "
+          "p-valores por bootstrap sobre as tarefas, como no MTEB-BR.\n"]
+    order = sorted(measured, key=lambda b: -_mean(S[b], MTEB_BR_TASKS))
+    models = [("**lumi-emb** (este trabalho)", "lumi-emb")] + [(BASELINE_NAMES[b], b) for b in order] \
+        + [("Lumi-4B sem treino (R0)", "R0")]
+    h = ["Modelo", "Mean22 [IC 95%]"] + [k.replace("Clusterização", "Clust.") for k in MTEB_BR_CATEGORIES]
+    rows = [[n, _ci(_mean22(S[c]))] + [_pct(_mean(S[c], ts), 1) for ts in MTEB_BR_CATEGORIES.values()]
+            for n, c in models]
+    md += ["#### MTEB-BR (22 tarefas nativas em PT-BR)\n", _table(h, [r for r in rows if _filled(r)]), ""]
+    if rows14b:
+        md += ["#### Comparação pareada no MTEB-BR\n",
+               _table(["Comparação", "Δ Mean22 [IC 95%]", "p", "Vitórias (tarefas)"],
+                      [r for r in rows14b if _filled(r)]), ""]
+    hpt = ["Modelo"] + list(MTEB_PT_FAMILIES)
+    rpt = [[n] + [_pct(_mean(S[c], ts), 1) for ts in MTEB_PT_FAMILIES.values()] for n, c in models]
+    md += ["#### MTEB-PT (por família)\n", _table(hpt, [r for r in rpt if _filled(r)]), ""]
+    rex = [[n] + [_pct(_mean(S[c], lists.get(k))) for k in EXTRA_SUITES] for n, c in models]
+    rex = [r for r in rex if _filled(r)]
+    if rex:
+        md += ["#### Outras suítes\n", _table(["Modelo"] + list(EXTRA_SUITES.values()), rex), ""]
+    rc = []
+    devs = {r[0]: r for r in rdev}
+    for c in CHECKPOINTS:
+        row = [c, _ci(_mean22(S[c])), devs[c][1] if c in devs else "—", devs[c][4] if c in devs else ""]
+        if _filled(row[:3]):
+            rc.append(row)
+    md += ["#### Checkpoints deste trabalho\n",
+           _table(["Checkpoint", "MTEB-BR Mean22 [IC 95%]", "dev nDCG@10", "Observação"], rc), ""]
+    if seeds:
+        hs, rs = seeds
+        md += ["#### Variação entre sementes (C2)\n", _table(hs, rs[:1 + len(MTEB_BR_CATEGORIES)]), ""]
+    r15 = [r for r in rows15 if r[-1]]
+    if r15:
+        md += ["#### Ablações (MTEB-BR)\n", _table(["ID", "Pergunta", "Comparação", "Δ Mean22 [IC 95%]", "p", "Tarefas"],
+                                                   r15), f"\n{A2_NOTE}\n"]
+    md += ["#### Hipóteses pré-registradas\n", _table(["ID", "Hipótese", "Teste", "Δ [IC 95%]", "p", "Situação"], rh),
+           "\n\"Refutada\" / \"Não refutada\" aplicam o critério de falseamento do plano; \"—\" = ainda não "
+           "executado.\n"]
+    return "\n".join(md)
+
+
+def update_card_block(block: str) -> None:
     card = REPO_ROOT / "docs" / "huggingface" / "README.md"
     if not card.exists():
         return
     t = card.read_text(encoding="utf-8")
     a, b = "<!-- RESULTS:START -->", "<!-- RESULTS:END -->"
     if a in t and b in t:
-        body = results_md.split("\n", 2)[-1].replace("\n## ", "\n#### ")  # sem o título; abaixo de "### Resultados"
-        body = "### Resultados\n" + body
-        t = t.split(a)[0] + a + "\n" + body + "\n" + b + t.split(b)[1]
+        t = t.split(a)[0] + a + "\n" + block.rstrip() + "\n\n" + b + t.split(b)[1]
         card.write_text(t, encoding="utf-8")
