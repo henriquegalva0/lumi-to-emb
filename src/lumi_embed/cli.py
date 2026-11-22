@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("data", help="pipeline de dados")
-    p.add_argument("step", choices=["sources", "synth", "decontam", "mine", "mix"])
+    p.add_argument("step", choices=["sources", "synth", "decontam", "audit", "mine", "mix"])
     p.add_argument("--only", default=None, help="sources: lista separada por vírgulas")
     p.add_argument("--generator", default=None, help="synth: chave do gerador (configs/embed/data.yaml)")
 
@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
                 from .data.decontaminate import run_decontaminate
 
                 run_decontaminate(cfg)
+            elif args.step == "audit":
+                from .data.decontaminate import run_audit
+
+                run_audit(cfg)
             elif args.step == "mine":
                 from .data.mine import run_mine
 

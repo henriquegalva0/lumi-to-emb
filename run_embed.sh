@@ -8,6 +8,7 @@
 #   sources [--only a,b]         fontes reais, sementes e texto do S0               (CPU)
 #   synth [--generator NOME]     geração sintética com os LLMs geradores            (GPU, vLLM)
 #   decontam                     índice da avaliação + filtro de contaminação       (CPU)
+#   audit                        confere os conjuntos montados contra o índice     (CPU)
 #   mine                         teacher + negativos difíceis                       (GPU, vLLM)
 #   mix                          conjuntos S1, S2, ablações, R1, S-long e dev       (CPU)
 #   export-base                  R0 = lumi-4b sem treino, como embedder
@@ -116,6 +117,7 @@ main() {
     sources)     embed_env; run data sources "$@" ;;
     synth)       vllm_env || die "vLLM não encontrado: rode este comando na imagem vllm/vllm-openai:v0.29.0."; gpu_banner; run data synth "$@" ;;
     decontam)    embed_env; run data decontam ;;
+    audit)       embed_env; run data audit ;;
     mine)        vllm_env || die "vLLM não encontrado: rode este comando na imagem vllm/vllm-openai:v0.29.0."; gpu_banner; run data mine ;;
     mix)         embed_env; run data mix ;;
     export-base) embed_env; run export-base ;;

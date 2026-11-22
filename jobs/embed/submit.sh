@@ -29,7 +29,7 @@ case "$STEP" in
   setup|selftest)          profile=cpu; hours=2; mem=16g ;;
   diagnose)                profile=cpu; hours=1; mem=8g; cpus=2 ;;
   sources)                 profile=cpu; hours=8; mem=64g ;;
-  decontam)                profile=cpu; hours=8; mem=64g ;;
+  decontam|audit)          profile=cpu; hours=8; mem=64g ;;
   mix|report)              profile=cpu; hours=2; mem=32g ;;
   publish|card)            profile=cpu; hours=3; mem=16g; cpus=2 ;;
   check|export-base|verify) hours=2 ;;

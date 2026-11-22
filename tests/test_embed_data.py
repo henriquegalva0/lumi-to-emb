@@ -387,8 +387,8 @@ def test_eval_index_is_saved_per_task_and_resumes(data_cfg, tmp_path, monkeypatc
     assert loads == [] and (idx2["ngrams"] == idx["ngrams"]).all()
 
 
-def test_eval_index_key_compatible_with_previous_runs(data_cfg, tmp_path, monkeypatch):
-    # Um índice gravado antes da opção skip_tasks (chave sem ela) continua sendo reaproveitado.
+def test_eval_index_from_before_version_2_is_rebuilt(data_cfg, tmp_path, monkeypatch):
+    # Um índice gravado antes da correção do extrator (chave sem index_version) não pode ser reaproveitado.
     from lumi_embed.data import decontaminate as dc
 
     d = tmp_path / "data/embed/decontam"
@@ -397,9 +397,81 @@ def test_eval_index_key_compatible_with_previous_runs(data_cfg, tmp_path, monkey
     np.savez(d / "eval_index.npz", ngrams=np.array([1, 2], dtype=np.uint64), texts=np.array([3], dtype=np.uint64))
     (d / "eval_index.json").write_text(json.dumps({"key": {k: dc_cfg[k] for k in ("benchmarks", "ngram", "stride")},
                                                    "tasks": {}, "n_ngrams": 2, "n_texts": 1}))
-    monkeypatch.setattr(dc, "eval_tasks", lambda b: (_ for _ in ()).throw(AssertionError("não devia reindexar")))
+    called = []
+    monkeypatch.setattr(dc, "eval_tasks", lambda b: called.append(b) or [])
     dc_cfg["skip_tasks"] = []
-    assert list(dc.build_index(data_cfg)["ngrams"]) == [1, 2]
+    dc.build_index(data_cfg)
+    assert called, "o índice antigo devia ser refeito"
+
+
+def _legacy_task(name, corpus, queries, loads=None):
+    # Formato antigo do mteb (retrieval do mteb_pt, LongEmbed): textos em task.corpus / task.queries.
+    import types
+
+    t = types.SimpleNamespace(metadata=types.SimpleNamespace(name=name), dataset=None)
+
+    def load_data():
+        if loads is not None:
+            loads.append(name)
+        t.corpus = {"test": {f"d{i}": {"title": "", "text": c} for i, c in enumerate(corpus)}}
+        t.queries = {"test": {f"q{i}": q for i, q in enumerate(queries)}}
+        t.relevant_docs = {"test": {"q0": {"d0": 1}}}
+
+    t.load_data = load_data
+    return t
+
+
+def test_eval_index_reads_legacy_corpus_and_queries(data_cfg, tmp_path, monkeypatch):
+    # Regressão: as tarefas de retrieval do MTEB-BR entravam com 0 textos (só task.dataset era lido).
+    from lumi_embed.data import decontaminate as dc
+
+    doc = " ".join(f"documento{i}" for i in range(40))
+    query = "qual é a regra para declarar despesas médicas no imposto de renda deste ano"
+    monkeypatch.setattr(dc, "eval_tasks", lambda b: [_legacy_task("FaqBacenRetrieval", [doc], [query])])
+    idx = dc.build_index(data_cfg)
+    assert idx["meta"]["tasks"]["FaqBacenRetrieval"] == 2
+    h = dc.Hasher()
+    assert dc.is_contaminated(h, doc, idx, 13, 0.3) == "exact"
+    assert dc.is_contaminated(h, query, idx, 13, 0.3) == "exact"
+
+
+def test_eval_index_fails_on_task_without_texts(data_cfg, monkeypatch):
+    from lumi_embed.data import decontaminate as dc
+    from lumi_embed.utils import EmbedError
+
+    monkeypatch.setattr(dc, "eval_tasks", lambda b: [_legacy_task("Vazia", [], [])])
+    with pytest.raises(EmbedError, match="sem nenhum texto"):
+        dc.build_index(data_cfg)
+
+
+def test_audit_redoes_empty_cached_tasks_and_finds_hits(data_cfg, tmp_path, monkeypatch):
+    # Cache com a tarefa vazia (extrator antigo) é refeito; a auditoria acha o texto e atribui à tarefa.
+    from lumi_embed.data import decontaminate as dc
+
+    n, stride = data_cfg["decontamination"]["ngram"], data_cfg["decontamination"]["stride"]
+    task_dir = tmp_path / f"data/embed/decontam/tasks_n{n}_s{stride}"
+    task_dir.mkdir(parents=True)
+    empty = np.array([], dtype=np.uint64)
+    np.savez(task_dir / "Quati.npz", texts=empty, ngrams=empty, count=np.array(0))
+    doc = " ".join(f"passagem{i}" for i in range(40))
+    loads = []
+    monkeypatch.setattr(dc, "eval_tasks", lambda b: [_legacy_task("Quati", [doc], ["pergunta curta demais"], loads)])
+    sets = tmp_path / "data/embed/sets/S1"
+    sets.mkdir(parents=True)
+    rows = [{"id": "a", "query": "consulta qualquer sobre a passagem", "positive": doc, "negatives": []},
+            {"id": "b", "query": "outra consulta", "positive": "texto limpo sem relação nenhuma com a avaliação",
+             "negatives": [{"text": doc, "score": 0.5}]},
+            {"id": "c", "query": "nada", "positive": "também limpo", "negatives": []}]
+    (sets / "train.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    rep = dc.run_audit(data_cfg)
+    assert loads == ["Quati"] and rep["focus_tasks"] == ["Quati"]
+    s = rep["sets"]["S1/train"]
+    assert s["examples"] == 3 and s["examples_hit"] == 2
+    assert s["by_field"] == {"positive": 1, "negative": 1} and s["by_task"] == {"Quati": 2}
+    assert "Quati: 2" in (tmp_path / "results/embed/contamination/audit.md").read_text()
+    # reexecutar não reindexa e mantém a lista de tarefas conferidas
+    loads.clear()
+    assert dc.run_audit(data_cfg)["focus_tasks"] == ["Quati"] and loads == []
 
 
 def test_cached_near_dup_matches_reference_and_selection_is_unchanged():
