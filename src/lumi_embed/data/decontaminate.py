@@ -334,18 +334,16 @@ def run_audit(cfg: dict) -> dict:
     """Confere os conjuntos já montados (data/embed/sets) contra o índice atual, sem alterar nada.
 
     Serve para verificar, depois do treino, tarefas que o índice usado no filtro não cobria. Cada
-    acerto é atribuído às tarefas em `redone_empty` (as que entraram vazias no índice antigo) e
-    `outra` quando não está em nenhuma delas. Saída: results/embed/contamination/audit.{json,md}.
+    acerto é atribuído às tarefas que entraram vazias no índice do filtro (lidas do relatório do
+    filtro, results/embed/contamination/report.json) e `outra` quando não está em nenhuma delas.
+    Todos os acertos ficam em `hits` (id, campo, tarefas). Saída: results/embed/contamination/audit.*.
     """
     dcfg = cfg["decontamination"]
     index = build_index(cfg)
     hasher = Hasher()
     n, stride, thr = int(dcfg["ngram"]), int(dcfg["stride"]), float(dcfg["threshold"])
     task_dir = data_dir("decontam") / f"tasks_n{n}_s{stride}"
-    focus = list(index["meta"].get("redone_empty") or [])
-    if not focus and data_dir("decontam", "audit_focus.json").exists():
-        focus = json.loads(data_dir("decontam", "audit_focus.json").read_text())
-    write_json(data_dir("decontam", "audit_focus.json"), focus)
+    focus = audit_focus(index)
     per = {}
     for t in focus:
         z = np.load(task_dir / f"{t}.npz")
@@ -357,10 +355,10 @@ def run_audit(cfg: dict) -> dict:
             if not path.exists():
                 continue
             st = {"examples": 0, "examples_hit": 0, "by_field": Counter(), "by_reason": Counter(),
-                  "by_task": Counter(), "samples": []}
+                  "by_task": Counter(), "examples_by_task": Counter(), "samples": [], "hits": []}
             for ex in iter_jsonl(path):
                 st["examples"] += 1
-                hit = False
+                hit, ex_tasks = False, set()
                 for field, text in _texts_of(ex):
                     if not text:
                         continue
@@ -373,10 +371,14 @@ def run_audit(cfg: dict) -> dict:
                     tasks = [t for t in focus if is_contaminated(hasher, text, per[t], n, thr)] or ["outra"]
                     for t in tasks:
                         st["by_task"][t] += 1
+                    ex_tasks.update(tasks)
+                    st["hits"].append({"id": ex.get("id"), "field": field, "reason": why, "tasks": tasks})
                     if len(st["samples"]) < 20:
                         st["samples"].append({"id": ex.get("id"), "field": field, "reason": why, "tasks": tasks,
                                               "source": ex.get("source"), "text": text[:300]})
                 st["examples_hit"] += hit
+                for t in ex_tasks:
+                    st["examples_by_task"][t] += 1
             key = f"{name}/{split}"
             report["sets"][key] = {k: (dict(v) if isinstance(v, Counter) else v) for k, v in st.items()}
             log.info("auditoria %s: %d de %d exemplos com algum texto da avaliação %s", key, st["examples_hit"],
@@ -386,17 +388,32 @@ def run_audit(cfg: dict) -> dict:
     return report
 
 
+def audit_focus(index: dict) -> list[str]:
+    """Tarefas a conferir à parte: as que tinham 0 textos no índice usado pelo filtro (relatório dele).
+
+    Não depende de qual execução refez o índice (um job reiniciado já encontraria os caches prontos).
+    """
+    rep = results_dir("contamination", "report.json")
+    if rep.exists():
+        tasks = json.loads(rep.read_text()).get("eval_index", {}).get("tasks", {})
+        focus = sorted(t for t, c in tasks.items() if c == 0)
+    else:
+        focus = sorted(index["meta"].get("redone_empty") or [])
+    return [t for t in focus if isinstance(index["meta"]["tasks"].get(t), int) and index["meta"]["tasks"][t] > 0]
+
+
 def render_audit(r: dict) -> str:
     lines = ["# Auditoria de contaminação dos conjuntos de treino\n",
              "Confere os conjuntos já montados contra o índice da avaliação corrigido (versão "
              f"{INDEX_VERSION}), sem alterar os dados. Mesmo critério do filtro: texto inteiro igual ou "
              f"≥ {r['threshold']:.0%} dos {r['ngram']}-gramas no índice. Tarefas conferidas à parte (entraram "
              "vazias no índice usado no filtro): " + (", ".join(r["focus_tasks"]) or "nenhuma") + ".\n",
-             "| Conjunto | Exemplos | Com acerto | Query | Positivo | Negativo | Por tarefa |",
+             "| Conjunto | Exemplos | Com acerto | Query | Positivo | Negativo | Exemplos por tarefa |",
              "|---|---|---|---|---|---|---|"]
     for k, s in r["sets"].items():
         f = s["by_field"]
-        tasks = ", ".join(f"{t}: {c}" for t, c in sorted(s["by_task"].items(), key=lambda kv: -kv[1])) or "—"
+        by = s.get("examples_by_task") or s["by_task"]
+        tasks = ", ".join(f"{t}: {c}" for t, c in sorted(by.items(), key=lambda kv: -kv[1])) or "—"
         lines.append(f"| `{k}` | {s['examples']} | {s['examples_hit']} | {f.get('query', 0)} | "
                      f"{f.get('positive', 0)} | {f.get('negative', 0)} | {tasks} |")
     samples = [(k, x) for k, s in r["sets"].items() for x in s["samples"]]

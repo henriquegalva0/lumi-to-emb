@@ -463,13 +463,19 @@ def test_audit_redoes_empty_cached_tasks_and_finds_hits(data_cfg, tmp_path, monk
              "negatives": [{"text": doc, "score": 0.5}]},
             {"id": "c", "query": "nada", "positive": "também limpo", "negatives": []}]
     (sets / "train.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    # relatório do filtro original: a tarefa tinha 0 textos no índice usado para filtrar
+    (tmp_path / "results/embed/contamination").mkdir(parents=True)
+    (tmp_path / "results/embed/contamination/report.json").write_text(
+        json.dumps({"eval_index": {"tasks": {"Quati": 0, "Outra": 10}}}))
     rep = dc.run_audit(data_cfg)
     assert loads == ["Quati"] and rep["focus_tasks"] == ["Quati"]
     s = rep["sets"]["S1/train"]
     assert s["examples"] == 3 and s["examples_hit"] == 2
     assert s["by_field"] == {"positive": 1, "negative": 1} and s["by_task"] == {"Quati": 2}
+    assert s["examples_by_task"] == {"Quati": 2} and {h["id"] for h in s["hits"]} == {"a", "b"}
     assert "Quati: 2" in (tmp_path / "results/embed/contamination/audit.md").read_text()
-    # reexecutar não reindexa e mantém a lista de tarefas conferidas
+    # job reiniciado: os caches já estão refeitos, e a lista de tarefas continua a mesma
+    (tmp_path / "data/embed/decontam/eval_index.npz").unlink()
     loads.clear()
     assert dc.run_audit(data_cfg)["focus_tasks"] == ["Quati"] and loads == []
 
