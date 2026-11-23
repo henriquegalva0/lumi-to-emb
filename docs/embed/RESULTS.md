@@ -24,9 +24,9 @@ O **lumi-emb** é o checkpoint `M-C` (M-C-base0.75), escolhido no dev pela regra
 | C3-long | — | — | — | — | — | — | — | — |
 | B2a | — | — | — | — | — | — | — | — |
 | B2f | — | — | — | — | — | — | — | — |
-| M-C | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | — | — |
+| M-C | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | — | 47.50 |
 | M-B | — | — | — | — | — | — | — | — |
-| lumi-emb | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | — | — |
+| lumi-emb | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | — | 47.50 |
 | Qwen3-Embedding-4B | 65.53 [57.33, 73.25] | 83.94 | 58.24 | 77.14 | 84.56 | — | — | — |
 | Qwen3-Embedding-8B | 67.35 [59.41, 74.86] | 84.66 | 62.61 | 78.85 | 85.99 | — | — | — |
 | Qwen3-Embedding-0.6B | 61.67 [53.93, 69.10] | 79.72 | 52.41 | 74.53 | 83.82 | — | — | — |
@@ -110,7 +110,7 @@ Mesma receita e mesmos dados; muda só a semente. Diferenças entre checkpoints 
 
 | Modelo | Relação com o lumi-emb | MTEB-BR Mean22 | MTEB-PT (STS/Cls/Ret/Rer) | MMTEB | LongEmbed |
 |---|---|---|---|---|---|
-| lumi-emb (este trabalho) | — | 62.41 | 79.5 / 55.4 / 77.8 / 85.4 | — | — |
+| lumi-emb (este trabalho) | — | 62.41 | 79.5 / 55.4 / 77.8 / 85.4 | — | 47.50 |
 | R0 (este trabalho) | Ponto de partida | 30.65 | 42.7 / 43.6 / 0.2 / 52.0 | — | — |
 | Qwen3-Embedding-4B | Mesmo porte, Transformer, líder aberto em PT | 65.53 (medido) | 83.9 / 58.2 / 77.1 / 84.6 (medido) | a medir | a medir |
 | Qwen3-Embedding-8B | Líder aberto no MTEB-BR | 67.35 (medido) | 84.7 / 62.6 / 78.9 / 86.0 (medido) | 70.58 [10] | a medir |
@@ -131,6 +131,13 @@ Valores com referência entre colchetes vêm da literatura (ver o plano); "(medi
 | lumi-emb − Qwen3-Embedding-0.6B | +0.74 [-1.92, +3.14] | 0.560 | 14/22 |
 | lumi-emb − multilingual-e5-large-instruct | -1.25 [-3.74, +1.05] | 0.309 | 10/22 |
 | C2 − Qwen3-Embedding-4B | -3.56 [-6.60, -0.76] | 0.012 | 6/22 |
+
+## LongEmbed por comprimento (tokens)
+
+| Modelo | Tarefa | 256 | 512 | 1024 | 2048 | 4096 | 8192 | 16384 | 32768 |
+|---|---|---|---|---|---|---|---|---|---|
+| lumi-emb | Passkey | 96 | 96 | 100 | 100 | 100 | 100 | 66 | 48 |
+| lumi-emb | Needle | 80 | 82 | 72 | 78 | 50 | 22 | 0 | 4 |
 
 ## Sensibilidade à contaminação
 
@@ -175,7 +182,7 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
 | H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
 | H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
-| H7 | Vantagem relativa em entradas longas | C3-long (ou C2) − Qwen3-Embedding-4B, LongEmbed | — | — | — |
+| H7 | Vantagem relativa em entradas longas | lumi-emb − Qwen3-Embedding-4B, LongEmbed | — | — | — |
 
 "Refutada" / "Não refutada" aplicam o critério de falseamento do plano; "—" = falta executar. H6 usa o dev (critério do plano), sem IC.
 

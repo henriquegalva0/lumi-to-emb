@@ -55,7 +55,7 @@ As far as we know, it is one of the first evaluations of a hybrid Mamba-Transfor
 | Embedding | estado oculto do último token (`</s>`), depois da normalização final; L2; similaridade de cosseno; dimensão 3136 |
 | Formato | query: `Instruct: {instrução}\nQuery: {query}</s>`; documento: `{texto}</s>`, sem instrução |
 | Modelo publicado | `lumi-emb` = M-C-base0.75: 0,75 × média de cinco checkpoints do S2 (C2, C2-real, C2-syn, C2-s2, C2-s3) + 0,25 × Lumi-4B sem treino (R0) |
-| Comprimento | treinado com até 512 tokens; o estágio de contexto longo (C3-long) ainda não foi treinado |
+| Comprimento | treinado com até 512 tokens; o estágio de contexto longo (C3-long) ainda não foi treinado. No LongEmbed (32k), acerta o passkey até 8k tokens e cai a partir de 16k |
 | Idiomas | português brasileiro (principal) e inglês |
 | Carregamento | transformers ≥ 5.23 nativo (`NemotronHModel`), **sem** `trust_remote_code` |
 
@@ -113,6 +113,8 @@ model.set_use_kernels(True, mode=Mode.TRAINING)   # o modo de treino também ser
 ```
 
 Os checkpoints intermediários ficam em branches com o nome de cada um. Exemplo: `revision="C2"`.
+
+Os trechos desta seção são executados contra este repositório pelo passo `hubcheck` do código: os embeddings do Sentence-Transformers, do Transformers e dos kernels batem com os do checkpoint local (cosseno ≥ 0,9999), e cada branch tem só os próprios pesos.
 
 ## Contexto: a janela efetiva do Lumi-4B (Etapa 1)
 
@@ -215,6 +217,12 @@ Notas × 100, geradas pelos arquivos de avaliação ([tabelas completas](https:/
 | Qwen3-Embedding-0.6B | 79.7 | 52.4 | 74.5 | 83.8 |
 | Lumi-4B sem treino (R0) | 42.7 | 43.6 | 0.2 | 52.0 |
 
+#### Outras suítes
+
+| Modelo | MMTEB | MTEB eng v2 | LongEmbed |
+|---|---|---|---|
+| **lumi-emb** (este trabalho) | — | — | 47.50 |
+
 #### Sensibilidade à contaminação
 
 A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de treino que coincidem com textos destas tarefas, que o índice usado no filtro não cobria: Quati, BRTaxQAR, FaQuADIR, QuatiReranking. São no máximo 0,1 % dos exemplos de cada conjunto. Para medir o efeito, a média é refeita sem essas tarefas, e a comparação pareada é repetida.
@@ -227,6 +235,13 @@ A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de t
 | Qwen3-Embedding-8B | 67.35 | 68.85 | -4.95 | -5.06 [-8.15, -2.24] | < 0.001 |
 | Qwen3-Embedding-0.6B | 61.67 | 63.15 | +0.74 | +0.64 [-2.56, +3.51] | 0.659 |
 | multilingual-e5-large-instruct | 63.65 | 65.89 | -1.25 | -2.10 [-4.99, +0.67] | 0.139 |
+
+#### LongEmbed por comprimento (tokens)
+
+| Modelo | Tarefa | 256 | 512 | 1024 | 2048 | 4096 | 8192 | 16384 | 32768 |
+|---|---|---|---|---|---|---|---|---|---|
+| lumi-emb | Passkey | 96 | 96 | 100 | 100 | 100 | 100 | 66 | 48 |
+| lumi-emb | Needle | 80 | 82 | 72 | 78 | 50 | 22 | 0 | 4 |
 
 #### Checkpoints deste trabalho
 
@@ -296,7 +311,7 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
 | H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
 | H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
-| H7 | Vantagem relativa em entradas longas | C3-long (ou C2) − Qwen3-Embedding-4B, LongEmbed | — | — | — |
+| H7 | Vantagem relativa em entradas longas | lumi-emb − Qwen3-Embedding-4B, LongEmbed | — | — | — |
 
 "Refutada" / "Não refutada" aplicam o critério de falseamento do plano; "—" = ainda não executado.
 
@@ -319,7 +334,7 @@ A situação de cada hipótese está na tabela "Hipóteses pré-registradas", ac
 ## Limitações
 
 - **Clusterização e STS:** é onde está a maior distância para o Qwen3-Embedding-4B; só a clusterização responde por 2,7 dos 3,1 pontos da diferença média. A mistura de treino tem quase só pares de busca e de frases semelhantes, sem dados que ensinem "mesmo tema", e o treino quase não moveu a clusterização.
-- **Contexto:** o contexto validado vai só até o comprimento treinado (512 tokens). Na Etapa 1, o backbone colapsou na geração a partir de 64k.
+- **Contexto:** o treino usou até 512 tokens. No LongEmbed, o passkey é recuperado em 100 % dos casos de 1k a 8k tokens, a janela do pré-treino contínuo do Lumi, e cai para 66 % em 16k e 48 % em 32k; o needle já cai a partir de 4k (50 %) e zera em 16k. Na Etapa 1, o backbone colapsou na geração a partir de 64k.
 - **Arquitetura:** o embedder híbrido Mamba-Transformer não tem validação prévia na literatura, e o trilho bidirecional é experimental.
 - **Retrieval em inglês:** é onde modelos recorrentes mostraram a maior lacuna. É monitorado à parte, no MTEB eng v2.
 - **Dependência do teacher:** os negativos e o filtro dos sintéticos vêm do Qwen3-Embedding-4B.
