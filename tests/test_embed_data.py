@@ -321,7 +321,7 @@ def test_run_mine_end_to_end_with_fake_teacher(data_cfg, tmp_path, monkeypatch):
     clean.mkdir(parents=True)
     (clean / "a.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
     data_cfg["mining"].update(inputs=["clean/a.jsonl"], embed_chunk=10, synthetic_min_cos=0.0, positive_rank_check=64,
-                              defer_families=[])
+                              defer_families=[], long_backend="vllm")
 
     stats = run_mine(data_cfg)
     assert set(stats) == {"retrieval", "retrieval_long", "sts"}
@@ -577,3 +577,75 @@ def test_decontam_keeps_report_of_previous_index_version(data_cfg, tmp_path, mon
     assert (d / "report_index_v1.md").read_text() == "filtro original"
     assert json.loads((d / "report_index_v1.json").read_text())["eval_index"]["tasks"] == {"Quati": 0}
     assert (d / "report.json").exists()
+
+
+def test_long_family_uses_transformers_teacher(data_cfg, tmp_path, monkeypatch):
+    # long_backend: hf — a família longa vai pelo teacher do transformers; as outras continuam no vLLM.
+    pytest.importorskip("torch")
+    import sys
+    import types
+
+    import torch
+
+    from lumi_embed.data import mine
+
+    def vec(texts):
+        return torch.nn.functional.normalize(torch.stack([torch.tensor([float(len(t) % 7 + 1), 1.0, float(i % 3)])
+                                                          for i, t in enumerate(texts)]), dim=-1)
+
+    calls = {"vllm": 0, "hf": []}
+
+    class FakeLLM:
+        def __init__(self, **kw):
+            calls["vllm"] += 1
+
+        def embed(self, texts, use_tqdm=False, tokenization_kwargs=None):
+            return [types.SimpleNamespace(outputs=types.SimpleNamespace(embedding=v.tolist())) for v in vec(texts)]
+
+    class FakeHF:
+        def __init__(self, mcfg, max_len):
+            self.cfg, self.max_len = mcfg, max_len
+            calls["hf"].append(max_len)
+
+        def embed(self, texts):
+            return vec(texts)
+
+        query_text = mine.Teacher.query_text
+
+    fake = types.ModuleType("vllm")
+    fake.LLM = FakeLLM
+    monkeypatch.setitem(sys.modules, "vllm", fake)
+    monkeypatch.setattr(mine, "HFTeacher", FakeHF)
+    rows = [make_example("retrieval", "pt-BR", "inst", f"pergunta {i}", f"documento longo {i} " + "x " * 40,
+                         {"gen": "g", "long": True}) for i in range(4)]
+    rows += [make_example("retrieval", "pt-BR", "inst", f"q{i}", f"passagem {i}", {"dataset": "x"}) for i in range(4)]
+    clean = tmp_path / "data/embed/clean"
+    clean.mkdir(parents=True)
+    (clean / "a.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
+    data_cfg["mining"].update(inputs=["clean/a.jsonl"], synthetic_min_cos=-1.0, positive_rank_check=64,
+                              defer_families=[], long_backend="hf")
+    stats = mine.run_mine(data_cfg)
+    assert stats["retrieval_long"]["backend"] == "transformers" and stats["retrieval"]["backend"] == "vllm"
+    assert calls["hf"] == [int(data_cfg["mining"]["max_len_long"])] and calls["vllm"] == 1
+
+
+def test_hf_teacher_left_padding_last_token_is_batch_invariant(tmp_path, tiny_tok_dir):
+    # O teacher do transformers (padding à esquerda, último token) dá o mesmo vetor sozinho ou em lote.
+    torch = pytest.importorskip("torch")
+    from transformers import AutoTokenizer, Qwen3Config, Qwen3Model
+
+    from lumi_embed.data.mine import HFTeacher
+
+    tok = AutoTokenizer.from_pretrained(str(tiny_tok_dir))
+    cfg = Qwen3Config(vocab_size=len(tok), hidden_size=64, num_hidden_layers=2, num_attention_heads=4,
+                      num_key_value_heads=2, head_dim=16, intermediate_size=128, pad_token_id=0)
+    torch.manual_seed(0)
+    Qwen3Model(cfg).save_pretrained(tmp_path / "q")
+    tok.save_pretrained(tmp_path / "q")
+    t = HFTeacher({"model": str(tmp_path / "q"), "hf_batch_long": 3}, max_len=64)
+    texts = ["a cidade foi fundada no século XIX e tem um museu", "rio", "o governo construiu uma ferrovia longa até o porto",
+             "museu de arte"]
+    batched = t.embed(texts)
+    alone = torch.cat([t.embed([x]) for x in texts])
+    assert torch.nn.functional.cosine_similarity(batched, alone).min() >= 0.9999
+    assert torch.allclose(batched.norm(dim=-1), torch.ones(len(texts)), atol=1e-5)

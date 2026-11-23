@@ -167,6 +167,8 @@ mining:                             # seção 2.4
   gpu_memory_utilization: 0.45      # o resto da GPU fica para a busca top-k
   embed_chunk: 16384                # textos por chamada ao teacher (limita a RAM das listas do vLLM)
   embed_chunk_long: 2048            # idem, na família de documentos longos (progresso mais frequente no log)
+  long_backend: hf                  # documentos longos pelo transformers: o pooling do vLLM travou 2x neles
+  hf_batch_long: 8                  # documentos de até 8k por lote no caminho transformers
   defer_families: []                # retrieval_long foi adiada no 1º job (8 h sem saída); agora é minerada
                                     # (famílias já mineradas são puladas; o progresso aparece no log)
   search_top: 64

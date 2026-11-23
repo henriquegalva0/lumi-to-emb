@@ -135,6 +135,50 @@ class Teacher:
         return self.cfg["query_template"].format(instruction=inst, query=ex["query"])
 
 
+class HFTeacher:
+    """O mesmo teacher pelo transformers, sem o vLLM, para a família de documentos longos.
+
+    No vLLM 0.29, o pooling travou duas vezes no primeiro bloco de documentos de até 8k tokens, sem erro:
+    8 h numa B200 inteira e 2,5 h na classe menor, com as queries da mesma família codificadas em segundos.
+    Aqui: padding à esquerda e o estado do último token, normalizado (como no card do Qwen3-Embedding);
+    lotes por comprimento, para pouco padding. Queries e documentos da família passam pelo mesmo caminho.
+    """
+
+    def __init__(self, mcfg: dict, max_len: int):
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        self.cfg, self.max_len = mcfg, int(max_len)
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        rev = mcfg.get("revision")
+        self.tok = AutoTokenizer.from_pretrained(mcfg["model"], revision=rev, padding_side="left")
+        if self.tok.pad_token is None:  # o do Qwen3-Embedding tem (<|endoftext|>); outros podem não ter
+            self.tok.pad_token = self.tok.eos_token or self.tok.unk_token
+        dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
+        self.model = AutoModel.from_pretrained(mcfg["model"], revision=rev, dtype=dtype).to(self.device).eval()
+        self.bs = int(mcfg.get("hf_batch_long", 8))
+
+    def embed(self, texts: list[str]):
+        import torch
+
+        order = sorted(range(len(texts)), key=lambda i: -len(texts[i]))
+        out: list = [None] * len(texts)
+        with torch.no_grad():
+            for b in range(0, len(order), self.bs):
+                idx = order[b : b + self.bs]
+                enc = self.tok([texts[i] for i in idx], padding=True, truncation=True, max_length=self.max_len,
+                               return_tensors="pt")
+                h = self.model(input_ids=enc["input_ids"].to(self.device),
+                               attention_mask=enc["attention_mask"].to(self.device)).last_hidden_state[:, -1]
+                e = torch.nn.functional.normalize(h.float(), dim=-1)
+                for j, i in enumerate(idx):
+                    out[i] = e[j]
+        e = torch.stack(out)
+        return e.half() if self.device == "cuda" else e
+
+    query_text = Teacher.query_text
+
+
 def _embed_all(teacher: Teacher, texts: list[str], bs: int, what: str):
     """Embeddings em lotes, com progresso no log (a família longa leva horas)."""
     import time
@@ -241,11 +285,18 @@ def run_mine(cfg: dict, inputs: list[str] | None = None) -> dict:
             all_stats[fam] = json.loads(fam_stats.read_text())
             log.info("%s já minerada (%d exemplos); pulando", fam, all_stats[fam].get("out", -1))
             continue
-        if teacher is None:
-            teacher = Teacher(mcfg)
-        teacher.max_len = int(mcfg["max_len_long"] if fam == "retrieval_long" else mcfg["max_len"])
-        log.info("Minerando %s: %d exemplos (max_len %d)", fam, len(rows), teacher.max_len)
-        kept, stats = mine_group(teacher, rows, [], mcfg)
+        if fam == "retrieval_long" and mcfg.get("long_backend", "vllm") == "hf":
+            fam_teacher = HFTeacher(mcfg, int(mcfg["max_len_long"]))
+            backend = "transformers"
+        else:
+            if teacher is None:
+                teacher = Teacher(mcfg)
+            teacher.max_len = int(mcfg["max_len_long"] if fam == "retrieval_long" else mcfg["max_len"])
+            fam_teacher, backend = teacher, "vllm"
+        log.info("Minerando %s: %d exemplos (max_len %d, %s)", fam, len(rows), fam_teacher.max_len, backend)
+        kept, stats = mine_group(fam_teacher, rows, [], mcfg)
+        stats["backend"] = backend
+        del fam_teacher
         _free_gpu()
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".jsonl.tmp")
