@@ -49,6 +49,9 @@ MTEB_PT_FAMILIES = {
     "PT Rer": ["MultiLongDocReranking", "WikipediaRerankingMultilingual", "XGlueWPRReranking"],
 }
 EXTRA_SUITES = {"mmteb": "MMTEB", "eng_v2": "MTEB eng v2", "longembed": "LongEmbed"}
+# Idiomas de cada suíte: as notas do MTEB-BR/MTEB-PT usam só os subconjuntos em português.
+PT = ("por",)
+SUITE_LANGS = {"mmteb": None, "eng_v2": ("eng",), "longembed": ("eng",)}
 ABLATIONS = [
     ("A1", "O estágio S1 é necessário?", "C2", "C2-direct"),
     ("S2", "O S2 (negativos difíceis) melhora o C1?", "C2", "C1"),
@@ -171,12 +174,13 @@ def _filled(row: list, first: int = 1) -> bool:
 
 
 # ---------------------------------------------------------------- coleta
-def collect(extra_models: list[str] | None = None) -> dict[str, dict]:
-    """{checkpoint ou hf_id: {tarefa: nota}}; a origem do lumi-emb herda as notas dele (mesmos pesos)."""
+def collect(extra_models: list[str] | None = None, languages: tuple[str, ...] | None = PT) -> dict[str, dict]:
+    """{checkpoint ou hf_id: {tarefa: nota}} nos idiomas pedidos; a origem do lumi-emb herda as notas
+    dele (mesmos pesos)."""
     cache = results_dir("mteb")
-    S = {c: load_scores(cache, model_name(c)) for c in CHECKPOINTS}
+    S = {c: load_scores(cache, model_name(c), languages) for c in CHECKPOINTS}
     for m in extra_models or []:
-        S[m] = load_scores(cache, m)
+        S[m] = load_scores(cache, m, languages)
     src = release_info().get("source")
     if src in S and src != "lumi-emb":
         if S["lumi-emb"] and not S[src]:
@@ -244,6 +248,39 @@ def merge_grid(name: str = "M-C") -> tuple[list[str], list[list]]:
     return ["Candidato", "dev nDCG@10", "Borda", ""], rows
 
 
+LEMB_BY_LENGTH = ["LEMBPasskeyRetrieval", "LEMBNeedleRetrieval"]
+
+
+def split_scores(model: str, task: str) -> dict[str, float]:
+    """{split: nota} de uma tarefa no cache do mteb (o LongEmbed tem um split por comprimento)."""
+    base = results_dir("mteb") / "results" / model.replace("/", "__")
+    best, mtime = {}, -1.0
+    for f in base.rglob(f"{task}.json") if base.exists() else []:
+        if f.stat().st_mtime > mtime:
+            j = _json(f)
+            best = {sp: float(es[0]["main_score"]) for sp, es in (j.get("scores") or {}).items()
+                    if isinstance(es, list) and es and "main_score" in es[0]}
+            mtime = f.stat().st_mtime
+    return best
+
+
+def lemb_length_rows(models: list[tuple[str, str]]) -> tuple[list[str], list[list]]:
+    """Passkey e Needle por comprimento (split test_<n>), para cada modelo com resultado."""
+    rows, lengths = [], set()
+    data = {}
+    for label, model in models:
+        for t in LEMB_BY_LENGTH:
+            sc = split_scores(model, t)
+            if sc:
+                data[(label, t)] = sc
+                lengths.update(sc)
+    order = sorted(lengths, key=lambda sp: int(sp.rsplit("_", 1)[-1]) if sp.rsplit("_", 1)[-1].isdigit() else 0)
+    for (label, t), sc in data.items():
+        rows.append([label, t.replace("LEMB", "").replace("Retrieval", "")] + [_pct(sc.get(sp), 0) for sp in order])
+    heads = [sp.replace("test_", "") for sp in order]
+    return (["Modelo", "Tarefa"] + heads, rows) if rows else ([], [])
+
+
 def dev_info(c: str) -> dict:
     return _json(ckpt_dir(c) / "summary.json")
 
@@ -263,7 +300,7 @@ def seed_table(S: dict) -> tuple[list[str], list[list]]:
     return ["Métrica"] + done + ["Média", "Desvio-padrão"], rows
 
 
-def hypotheses(S: dict, lists: dict) -> list[list]:
+def hypotheses(S: dict, lists: dict, SX: dict | None = None) -> list[list]:
     """Situação das hipóteses pelo critério de falseamento pré-registrado (tabela do model card)."""
     def verdict(r: dict, refuted: bool) -> str:
         return "—" if r.get("n", 0) == 0 else ("Refutada" if refuted else "Não refutada")
@@ -295,11 +332,12 @@ def hypotheses(S: dict, lists: dict) -> list[list]:
     else:
         rows.append(["H6", "O merge supera o melhor checkpoint individual (dev)", "M-C − melhor individual",
                      "—", "—", "—"])
-    le = lists.get("longembed")
-    ours = next((v for v in (_mean(S[c], le) for c in ("C3-long", "C2")) if v is not None), None)
-    theirs = _mean(S.get(QWEN4B, {}), le)
+    le, SL = lists.get("longembed"), (SX or {}).get("longembed", S)
+    cand = [(c, _mean(SL.get(c, {}), le)) for c in ("C3-long", "C2", "lumi-emb")]
+    who, ours = next(((c, v) for c, v in cand if v is not None), ("C3-long", None))
+    theirs = _mean(SL.get(QWEN4B, {}), le)
     ok = ours is not None and theirs is not None
-    rows.append(["H7", "Vantagem relativa em entradas longas", "C3-long (ou C2) − Qwen3-Embedding-4B, LongEmbed",
+    rows.append(["H7", "Vantagem relativa em entradas longas", f"{who} − Qwen3-Embedding-4B, LongEmbed",
                  f"{100 * (ours - theirs):+.2f}" if ok else "—", "—",
                  ("Refutada" if ours < theirs else "Não refutada") if ok else "—"])
     return rows
@@ -310,6 +348,10 @@ def build_report(ecfg: dict) -> str:
     baselines = [m["hf"] for m in LITERATURE if m["hf"]]
     S = collect(baselines)
     lists = suite_lists()
+    SX = {k: collect(baselines, SUITE_LANGS[k]) for k in EXTRA_SUITES}
+
+    def xmean(c: str, k: str):
+        return _mean(SX[k].get(c, {}), lists.get(k))
     rel = release_info()
     measured = [b for b in baselines if _complete(S[b])]
     tables = results_dir("tables")
@@ -328,7 +370,7 @@ def build_report(ecfg: dict) -> str:
     for c in CHECKPOINTS + measured:
         s = S[c]
         rows12.append([BASELINE_NAMES.get(c, c), _ci(_mean22(s))] + [_pct(_mean(s, ts)) for ts in MTEB_PT_FAMILIES.values()]
-                      + [_pct(_mean(s, lists.get(k))) for k in EXTRA_SUITES])
+                      + [_pct(xmean(c, k)) for k in EXTRA_SUITES])
     _write_csv(tables / "table12_overview.csv", h12, rows12)
     md += ["## Tabela 12 — Visão geral\n", _table(h12, rows12), ""]
 
@@ -363,11 +405,11 @@ def build_report(ecfg: dict) -> str:
         s = S[c]
         rows14.append([f"{c} (este trabalho)", "—" if c == "lumi-emb" else "Ponto de partida",
                        _pct(_mean(s, MTEB_BR_TASKS)), " / ".join(_pct(_mean(s, ts), 1) for ts in MTEB_PT_FAMILIES.values()),
-                       _pct(_mean(s, lists.get("mmteb"))), _pct(_mean(s, lists.get("longembed")))])
+                       _pct(xmean(c, "mmteb")), _pct(xmean(c, "longembed"))])
     for m in LITERATURE:
         s = S.get(m["hf"], {}) if m["hf"] else {}
         mbr, mpt = _mean(s, MTEB_BR_TASKS), [_mean(s, ts) for ts in MTEB_PT_FAMILIES.values()]
-        mmt, mle = _mean(s, lists.get("mmteb")), _mean(s, lists.get("longembed"))
+        mmt, mle = (xmean(m["hf"], "mmteb"), xmean(m["hf"], "longembed")) if m["hf"] else (None, None)
         rows14.append([m["model"], m["rel"],
                        m["mteb_br"] if mbr is None else f"{_pct(mbr)} (medido)",
                        m["mteb_pt"] if all(v is None for v in mpt) else " / ".join(_pct(v, 1) for v in mpt) + " (medido)",
@@ -391,6 +433,13 @@ def build_report(ecfg: dict) -> str:
         _write_csv(tables / "table14b_paired.csv", h14b, rows14b)
         md += ["## Tabela 14b — Comparação pareada no MTEB-BR\n", _table(h14b, rows14b), ""]
 
+    # LongEmbed por comprimento
+    lemb_models = [("lumi-emb", model_name("lumi-emb"))] + [(BASELINE_NAMES[b], b) for b in baselines]
+    hl, rl = lemb_length_rows(lemb_models)
+    if rl:
+        _write_csv(tables / "longembed_by_length.csv", hl, rl)
+        md += ["## LongEmbed por comprimento (tokens)\n", _table(hl, rl), ""]
+
     # Sensibilidade à contaminação (auditoria posterior)
     hc, rc, flagged = contamination_rows(S, measured)
     if rc:
@@ -410,7 +459,7 @@ def build_report(ecfg: dict) -> str:
 
     # Hipóteses
     hh = ["ID", "Hipótese", "Teste", "Δ [IC 95%]", "p", "Situação"]
-    rh = hypotheses(S, lists)
+    rh = hypotheses(S, lists, SX)
     _write_csv(tables / "hypotheses.csv", hh, rh)
     md += ["## Hipóteses pré-registradas: situação\n", _table(hh, rh),
            "\n\"Refutada\" / \"Não refutada\" aplicam o critério de falseamento do plano; \"—\" = falta executar. "
@@ -441,12 +490,12 @@ def build_report(ecfg: dict) -> str:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     (wpath("results", "embed", "RESULTS.md")).write_text(text, encoding="utf-8")
-    update_card_block(card_block(S, lists, measured, rows14b, rs and (hs, rs), rows15, rh, rdev))
+    update_card_block(card_block(S, lists, measured, rows14b, rs and (hs, rs), rows15, rh, rdev, xmean))
     return text
 
 
 # ---------------------------------------------------------------- bloco do model card
-def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev) -> str:
+def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev, xmean) -> str:
     """Versão resumida para o model card: só linhas com resultado; o completo fica no RESULTS.md."""
     md = ["### Resultados\n",
           f"Notas × 100, geradas pelos arquivos de avaliação ([tabelas completas]({RESULTS_URL})). Mesmo protocolo "
@@ -466,7 +515,7 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev) -> str:
     hpt = ["Modelo"] + list(MTEB_PT_FAMILIES)
     rpt = [[n] + [_pct(_mean(S[c], ts), 1) for ts in MTEB_PT_FAMILIES.values()] for n, c in models]
     md += ["#### MTEB-PT (por família)\n", _table(hpt, [r for r in rpt if _filled(r)]), ""]
-    rex = [[n] + [_pct(_mean(S[c], lists.get(k))) for k in EXTRA_SUITES] for n, c in models]
+    rex = [[n] + [_pct(xmean(c, k)) for k in EXTRA_SUITES] for n, c in models]
     rex = [r for r in rex if _filled(r)]
     if rex:
         md += ["#### Outras suítes\n", _table(["Modelo"] + list(EXTRA_SUITES.values()), rex), ""]
@@ -474,6 +523,10 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev) -> str:
     if rcn:
         md += ["#### Sensibilidade à contaminação\n", CONTAM_NOTE.format(tasks=", ".join(flagged)), "",
                _table(hcn, rcn), ""]
+    hl, rl = lemb_length_rows([("lumi-emb", model_name("lumi-emb"))]
+                              + [(BASELINE_NAMES[b], b) for b in BASELINE_NAMES])
+    if rl:
+        md += ["#### LongEmbed por comprimento (tokens)\n", _table(hl, rl), ""]
     rc = []
     devs = {r[0]: r for r in rdev}
     for c in CHECKPOINTS:

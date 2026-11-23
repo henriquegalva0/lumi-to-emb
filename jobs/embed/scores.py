@@ -40,8 +40,10 @@ def fam_cols(s: dict[str, float], groups: dict[str, list[str]], width: int) -> s
                      else f"{'—':>{width}s}" for ts in groups.values())
 
 
-def scores(model_dir: Path) -> dict[str, float]:
-    out = {}
+def scores(model_dir: Path, lang: str = "por") -> dict[str, float]:
+    """Nota por tarefa só com os subconjuntos do idioma (o MTEB eng v2 grava o MassiveIntent em inglês
+    numa pasta de revisão separada); junta todas as revisões, e o arquivo mais recente vale por subconjunto."""
+    entries: dict[str, dict] = {}
     for f in model_dir.rglob("*.json"):
         if f.name == "model_meta.json":
             continue
@@ -49,11 +51,19 @@ def scores(model_dir: Path) -> dict[str, float]:
             j = json.loads(f.read_text())
         except ValueError:
             continue
-        v = [e["main_score"] for es in (j.get("scores") or {}).values() if isinstance(es, list)
-             for e in es if isinstance(e, dict) and "main_score" in e]
-        if v:
-            out[j.get("task_name", f.stem)] = sum(v) / len(v)
-    return out
+        name, mtime = j.get("task_name", f.stem), f.stat().st_mtime
+        for split, es in (j.get("scores") or {}).items():
+            for e in es if isinstance(es, list) else []:
+                if not (isinstance(e, dict) and "main_score" in e):
+                    continue
+                langs = e.get("languages") or []
+                if langs and not any(str(x).split("-")[0] == lang for x in langs):
+                    continue
+                key = (split, e.get("hf_subset"))
+                task = entries.setdefault(name, {})
+                if key not in task or mtime > task[key][1]:
+                    task[key] = (e["main_score"], mtime)
+    return {t: sum(v for v, _ in d.values()) / len(d) for t, d in entries.items() if d}
 
 
 br_file = root / "results" / "embed" / "suites" / "mteb_br.json"

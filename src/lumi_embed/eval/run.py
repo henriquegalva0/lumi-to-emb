@@ -99,7 +99,7 @@ def evaluate_checkpoint(cfg: dict, ckpt_id: str, suites: list[str]) -> dict:
                           "minutes": round((time.time() - t0) / 60, 1)}
         del enc
         _free()
-    write_json(results_dir("runs", f"{ckpt_id}.json"), summary)
+    _write_run(results_dir("runs", f"{ckpt_id}.json"), summary)
     return summary
 
 
@@ -138,8 +138,19 @@ def evaluate_baseline(cfg: dict, hf_id: str, suites: list[str]) -> dict:
                           "minutes": round((time.time() - t0) / 60, 1)}
         del model
         _free()
-    write_json(results_dir("runs", f"baseline__{hf_id.replace('/', '__')}.json"), summary)
+    _write_run(results_dir("runs", f"baseline__{hf_id.replace('/', '__')}.json"), summary)
     return summary
+
+
+def _write_run(path, summary: dict) -> None:
+    """Acumula as suítes no resumo do modelo: avaliar outra suíte não apaga o registro das anteriores."""
+    import json
+
+    try:
+        old = json.loads(path.read_text())
+    except (OSError, ValueError):
+        old = {}
+    write_json(path, {**old, **summary})
 
 
 def _free():

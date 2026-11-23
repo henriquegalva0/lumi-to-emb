@@ -49,12 +49,28 @@ def main_score(result_json: dict) -> float | None:
     return float(np.mean(vals)) if vals else None
 
 
-def load_scores(cache_root: Path, model_name: str) -> dict[str, float]:
-    """{tarefa: score} a partir do cache de resultados do mteb (revisão mais recente)."""
+def _lang_ok(entry: dict, languages: tuple[str, ...] | None) -> bool:
+    """O subconjunto é de um dos idiomas pedidos (código ISO 639-3, ex.: "por" em "por-Latn")?"""
+    if not languages:
+        return True
+    langs = entry.get("languages")
+    if not langs:  # sem a informação: mantém
+        return True
+    return any(str(lang).split("-")[0] in languages for lang in langs)
+
+
+def load_scores(cache_root: Path, model_name: str, languages: tuple[str, ...] | None = None) -> dict[str, float]:
+    """{tarefa: score} a partir do cache de resultados do mteb.
+
+    Junta todos os arquivos da tarefa (o mteb grava uma pasta por revisão do modelo, e suítes
+    diferentes podem avaliar a mesma tarefa em idiomas diferentes, como o MassiveIntent em português no
+    MTEB-PT e em inglês no MTEB eng v2). Para cada (split, subconjunto) vale o arquivo mais recente; com
+    `languages`, só entram os subconjuntos desses idiomas. A nota é a média sobre o que entrou.
+    """
     base = Path(cache_root) / "results" / model_name.replace("/", "__")
-    out: dict[str, tuple[float, float]] = {}
     if not base.exists():
         return {}
+    entries: dict[str, dict[tuple, tuple[float, float]]] = {}
     for f in base.rglob("*.json"):
         if f.name == "model_meta.json":
             continue
@@ -62,8 +78,13 @@ def load_scores(cache_root: Path, model_name: str) -> dict[str, float]:
             data = json.loads(f.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        s = main_score(data)
         name = data.get("task_name") or f.stem
-        if s is not None and (name not in out or f.stat().st_mtime > out[name][1]):
-            out[name] = (s, f.stat().st_mtime)
-    return {k: v[0] for k, v in out.items()}
+        mtime = f.stat().st_mtime
+        for split, es in (data.get("scores") or {}).items():
+            for e in es if isinstance(es, list) else []:
+                if isinstance(e, dict) and "main_score" in e and _lang_ok(e, languages):
+                    key = (split, e.get("hf_subset"))
+                    task = entries.setdefault(name, {})
+                    if key not in task or mtime > task[key][1]:
+                        task[key] = (float(e["main_score"]), mtime)
+    return {t: float(np.mean([v for v, _ in d.values()])) for t, d in entries.items() if d}

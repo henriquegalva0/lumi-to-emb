@@ -181,3 +181,40 @@ def test_publish_creates_private_repo_branch_and_card(tmp_path, monkeypatch):
     ups = [c for c in calls if c[0] == "upload"]
     assert ups[0][1] == "main" and ups[1][1] == "main" and "README.md" in ups[1][2]   # pesos, depois o card
     assert not any(c[0] == "branch" for c in calls)
+
+
+def test_longembed_by_length_and_run_summary_accumulates(tmp_path, monkeypatch):
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    d = tmp_path / "results/embed/mteb/results/lumi-embed__lumi-emb/rev1"
+    d.mkdir(parents=True)
+    scores = {f"test_{n}": [{"main_score": v}] for n, v in [(256, 0.96), (8192, 1.0), (32768, 0.48)]}
+    (d / "LEMBPasskeyRetrieval.json").write_text(json.dumps({"task_name": "LEMBPasskeyRetrieval", "scores": scores}))
+    h, rows = rep.lemb_length_rows([("lumi-emb", "lumi-embed/lumi-emb"), ("Outro", "org/outro")])
+    assert h == ["Modelo", "Tarefa", "256", "8192", "32768"]
+    assert rows == [["lumi-emb", "Passkey", "96", "100", "48"]]
+
+    from lumi_embed.eval import run as runmod
+
+    f = tmp_path / "runs.json"
+    runmod._write_run(f, {"mteb_br": {"minutes": 90}})
+    runmod._write_run(f, {"longembed": {"minutes": 108}})
+    assert set(json.loads(f.read_text())) == {"mteb_br", "longembed"}
+
+
+def test_scores_filtered_by_language_and_merged_across_revisions(tmp_path):
+    # O MTEB eng v2 grava o MassiveIntent em inglês numa pasta de revisão nova: a família PT não pode
+    # passar a usar essa nota, e o MTEB eng v2 não pode usar a de português.
+    import os
+
+    base = tmp_path / "results" / "lumi-embed__lumi-emb"
+    pt = {"task_name": "MassiveIntentClassification", "scores": {"test": [
+        {"main_score": 0.68, "hf_subset": "pt", "languages": ["por-Latn"]}]}}
+    en = {"task_name": "MassiveIntentClassification", "scores": {"test": [
+        {"main_score": 0.72, "hf_subset": "en", "languages": ["eng-Latn"]}]}}
+    for rev, data in (("old", pt), ("new", en)):
+        (base / rev).mkdir(parents=True)
+        (base / rev / "MassiveIntentClassification.json").write_text(json.dumps(data))
+    os.utime(base / "new" / "MassiveIntentClassification.json", (2e9, 2e9))
+    assert load_scores(tmp_path, "lumi-embed/lumi-emb", ("por",)) == {"MassiveIntentClassification": 0.68}
+    assert load_scores(tmp_path, "lumi-embed/lumi-emb", ("eng",)) == {"MassiveIntentClassification": 0.72}
+    assert abs(load_scores(tmp_path, "lumi-embed/lumi-emb")["MassiveIntentClassification"] - 0.70) < 1e-9
