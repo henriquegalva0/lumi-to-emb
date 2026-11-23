@@ -7,7 +7,7 @@ O [plano](plano_experimento.pdf) define o experimento; este documento registra *
 | ID | Decisão | Estado nesta versão |
 |---|---|---|
 | D1 | Checkpoint de partida | `ceia-research/lumi-4b` (instruct), revisão `27b30f4`. Um checkpoint pré-SFT, se existir, entra em `model.hf_id`/`revision` (ablação A11) |
-| D2 | Licença | **Pendente.** Ver a seção de licenças da [ficha dos dados](DATA_CARD.md#licenças-o-que-isto-implica-para-o-modelo-decisão-d2) (mMARCO não comercial; Lumi sem licença declarada) |
+| D2 | Licença | **Uso não comercial.** Ver a seção de licenças da [ficha dos dados](DATA_CARD.md#licenças-o-que-isto-implica-para-o-modelo-decisão-d2) (entre os dados de treino, o mMARCO é de uso não comercial) |
 | D3 | LoRA × fine-tuning completo | `train.method` em cada configuração. Padrão: LoRA r = 16. A10: `C2-full` (completo) e `C2-attnonly` (LoRA só na atenção) |
 | D4 | Pooling do trilho bidirecional | `embedding.pooling`. Padrão: média. A6: `B2a-eos` |
 

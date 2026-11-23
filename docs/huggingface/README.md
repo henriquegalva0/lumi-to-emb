@@ -3,8 +3,8 @@ language:
   - pt
   - en
 license: other
-license_name: pendente
-license_link: https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/DATA_CARD.md
+license_name: uso-nao-comercial
+license_link: https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/DATA_CARD.md#licenças-o-que-isto-implica-para-o-modelo-decisão-d2
 base_model: ceia-research/lumi-4b
 base_model_relation: finetune
 pipeline_tag: feature-extraction
@@ -95,7 +95,7 @@ def embed(texts, instruction=None):
     with torch.no_grad():
         h = model(**batch, use_cache=False).last_hidden_state
     last = batch["attention_mask"].sum(dim=1) - 1               # posição do </s>
-    return F.normalize(h[torch.arange(h.shape[0]), last].float(), dim=-1)
+    return F.normalize(h[torch.arange(h.shape[0], device=h.device), last].float(), dim=-1)
 
 q = embed(["o que é inflação?"], "Dada uma pergunta, recupere passagens que a respondam")
 d = embed(["Inflação é o aumento generalizado e contínuo dos preços."])
@@ -327,7 +327,7 @@ A situação de cada hipótese está na tabela "Hipóteses pré-registradas", ac
 - **Dev saturado:** o dev (1.500 consultas, com 30 mil distratores fixos) fica perto de 0,977 nos candidatos ao merge. As diferenças entre eles são de milésimos, perto da variação entre sementes (0,0004 de amplitude). Ele serve para descartar candidatos ruins, mas separa pouco os bons.
 - **Contaminação residual:** ver a auditoria posterior, na seção Dados.
 - **Ablação A2 em escalas diferentes:** S2-real (91 mil exemplos, dos quais só 22,5 mil em PT nativo; o resto é mMARCO traduzido e bitexto) e S2-syn (74 mil) não têm o tamanho do S2 (120 mil).
-- **Licença pendente (D2):** o mMARCO é de uso não comercial, e o `lumi-4b` ainda não declara licença.
+- **Uso não comercial:** entre os dados de treino está o mMARCO/MS MARCO, de uso não comercial.
 
 ## Reprodução
 
@@ -335,7 +335,7 @@ Todo o pipeline, com dados, treino, merge, avaliação e publicação, está em 
 
 ## Licença
 
-**Pendente (decisão D2 do plano).** O modelo deriva do `lumi-4b`, que ainda não declara licença, e do Nemotron 3 Nano 4B (NVIDIA Nemotron Open Model License). Foi treinado com dados de licenças diversas, inclusive o mMARCO/MS MARCO, que é **não comercial**. Até a definição, use apenas para pesquisa.
+**Uso não comercial.** O modelo deriva do `lumi-4b` e do Nemotron 3 Nano 4B (NVIDIA Nemotron Open Model License). Foi treinado com dados de licenças diversas, inclusive o mMARCO/MS MARCO, que é de uso não comercial. Detalhes na [ficha dos dados](https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/DATA_CARD.md#licenças-o-que-isto-implica-para-o-modelo-decisão-d2).
 
 ## Citação
 

@@ -145,7 +145,7 @@ O modelo publicado, **lumi-emb** (merge M-C-base0.75, escolhido no dev), fica em
 ## Licenças
 
 - **Código:** [MIT](LICENSE).
-- **Modelos derivados:** licença **pendente** (decisão D2 do plano). Eles derivam do `lumi-4b`, que ainda não declara licença, e do Nemotron 3 Nano 4B (NVIDIA Nemotron Open Model License).
+- **Modelos derivados:** **uso não comercial** (decisão D2 do plano). Eles derivam do `lumi-4b` e do Nemotron 3 Nano 4B (NVIDIA Nemotron Open Model License).
 - **Dados de treino:** incluem o mMARCO/MS MARCO, de **uso não comercial**. Os detalhes estão na [ficha dos dados](docs/embed/DATA_CARD.md#licenças-o-que-isto-implica-para-o-modelo-decisão-d2).
 
 ## Referências
