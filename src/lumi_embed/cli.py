@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("ckpt")
     p.add_argument("--release", action="store_true")
     sub.add_parser("card", help="envia o model card e a documentação ao Hub")
+    sub.add_parser("hubcheck", help="carrega o modelo publicado como o card ensina e compara com o local")
 
     args = ap.parse_args(argv)
     ts = time.strftime("%Y%m%d-%H%M%S")
@@ -139,6 +140,10 @@ def main(argv: list[str] | None = None) -> int:
             from .publish import push_card
 
             push_card(base_cfg()["hub"]["repo"])
+        elif args.cmd == "hubcheck":
+            from .hubcheck import run_hubcheck
+
+            log.info("%s", run_hubcheck(base_cfg()))
     except EmbedError as exc:
         log.error("ERRO: %s", exc)
         print(f"\nERRO: {exc}", file=sys.stderr)

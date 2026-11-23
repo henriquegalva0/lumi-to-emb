@@ -145,3 +145,48 @@ def test_cpu_load_skips_hub_kernels(tiny_dir):
     # Na CPU (testes, exportação) a verificação não roda e o modelo registra que não usou kernels.
     m = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, device="cpu")
     assert m.kernel_info is None
+
+
+def _fake_hub(repo_dir, extra_files=()):
+    import types
+
+    files = [str(p.relative_to(repo_dir)) for p in repo_dir.rglob("*") if p.is_file()] + list(extra_files)
+    return types.SimpleNamespace(
+        list_repo_refs=lambda repo, repo_type=None: types.SimpleNamespace(branches=[types.SimpleNamespace(name="main")]),
+        list_repo_files=lambda repo, revision=None, repo_type=None: files,
+    )
+
+
+def test_hubcheck_runs_card_snippets_against_published_model(tiny_dir, tmp_path, monkeypatch):
+    # O "repositório" é o próprio checkpoint salvo: os trechos do card (ST e Transformers) têm de
+    # carregá-lo e dar os mesmos embeddings do LumiEmbedder local.
+    import json
+
+    from lumi_embed import hubcheck
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    out = save_embedder(load(tiny_dir), tmp_path / "pub", meta={"seed": 0}, dtype=torch.float32)
+    from lumi_embed.utils import EmbedError
+
+    monkeypatch.setattr(hubcheck, "MIN_COS", 0.98)  # modelo minúsculo em bf16 na CPU
+    # Modelo aleatório: carrega e bate com o local, mas não tem como acertar a checagem semântica.
+    with pytest.raises(EmbedError, match="sanity"):
+        hubcheck.run_hubcheck({"hub": {"repo": str(out)}}, local=str(out), device="cpu", api=_fake_hub(out))
+    res = json.loads((tmp_path / "results/embed/hubcheck.json").read_text())
+    c = res["checks"]
+    assert c["branches"] and c["sentence_transformers"] and c["transformers"] and c["kernels"] is None
+    assert c["sanity"] is False and res["sentence_transformers"]["max_seq_length"] == 512
+    assert res["sentence_transformers"]["cos_query"] >= 0.98 and res["transformers"]["cos_query"] >= 0.98
+
+
+def test_hubcheck_fails_on_branch_with_stray_shards(tiny_dir, tmp_path, monkeypatch):
+    from lumi_embed import hubcheck
+    from lumi_embed.utils import EmbedError
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    out = save_embedder(load(tiny_dir), tmp_path / "pub", meta={"seed": 0}, dtype=torch.float32)
+    monkeypatch.setattr(hubcheck, "MIN_COS", 0.98)
+    api = _fake_hub(out, extra_files=["model-00001.safetensors"])  # shard que sobrou de outro modelo
+    with pytest.raises(EmbedError, match="branches"):
+        hubcheck.run_hubcheck({"hub": {"repo": str(out)}}, local=str(out), device="cpu", api=api)
+    assert (tmp_path / "results/embed/hubcheck.json").exists()

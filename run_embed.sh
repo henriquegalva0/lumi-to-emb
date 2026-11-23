@@ -19,6 +19,7 @@
 #   baseline HF_ID SUÍTE [...]   avalia um modelo de comparação (Tabela 14)
 #   report                       Tabelas 12–15, docs/embed/RESULTS.md e model card
 #   publish ID [--release]       envia o checkpoint ao Hub (branch ID; --release = main)
+#   hubcheck                     carrega o modelo do Hub como o card ensina e compara (GPU)
 #   card                         envia o model card e a documentação ao Hub
 #   selftest                     testes automatizados (sem GPU)
 #   diagnose                     empacota logs e ambiente (mesmo do run_stage1.sh)
@@ -131,6 +132,7 @@ main() {
     report)      embed_env; run report ;;
     publish)     embed_env; run publish "$@" ;;
     card)        embed_env; run card ;;
+    hubcheck)    embed_env; gpu_banner; run hubcheck ;;
     diagnose)    bash "$REPO_DIR/run_stage1.sh" diagnose ;;
     *) usage; die "comando desconhecido: $CMD" ;;
   esac

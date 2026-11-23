@@ -32,6 +32,7 @@ case "$STEP" in
   decontam|audit)          profile=cpu; hours=8; mem=64g ;;
   mix|report)              profile=cpu; hours=2; mem=32g ;;
   publish|card)            profile=cpu; hours=3; mem=16g; cpus=2 ;;
+  hubcheck)                profile=cpu; hours=2; mem=48g ;;   # classe menor; baixa ~7 GB do Hub
   check|export-base|verify) hours=2 ;;
   synth|mine)              hours=12 ;;
   train|baseline)          hours=12 ;;
