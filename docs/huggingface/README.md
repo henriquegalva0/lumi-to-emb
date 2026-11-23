@@ -33,7 +33,7 @@ datasets:
 
 # Lumi-Embed (lumi-4b-embedding)
 
-> **Versão de pesquisa.** O modelo publicado (branch `main`) é o **lumi-emb**, um merge de checkpoints escolhido no dev. No MTEB-BR (22 tarefas nativas em PT-BR), ele fica em **62,41**: empatado estatisticamente com o multilingual-e5-large-instruct e o Qwen3-Embedding-0.6B e abaixo do Qwen3-Embedding-4B (65,53). Em retrieval, empata com o Qwen3-Embedding-4B, e tem a maior média em classificação entre os modelos comparados. A maior distância está em clusterização e STS. As tabelas abaixo são geradas a partir dos arquivos de avaliação. As ablações restantes (trilho bidirecional, contexto longo, variantes de negativos) ainda não foram executadas.
+> **Versão de pesquisa.** O modelo publicado (branch `main`) é o **lumi-emb**, um merge de checkpoints escolhido no dev. No MTEB-BR (22 tarefas nativas em PT-BR), ele fica em **62,41**: empatado estatisticamente com o multilingual-e5-large-instruct e o Qwen3-Embedding-0.6B e abaixo do Qwen3-Embedding-4B (65,53). Em retrieval, empata com o Qwen3-Embedding-4B, e tem a maior média em classificação entre os modelos comparados. A maior distância está em clusterização e STS e, sobretudo, em **documentos longos**: o treino usou só 512 tokens, e no LongEmbed (47,50 contra 80,12) e no MLDR-pt com documentos de até 8k tokens (47,88 contra 80,23) ele fica muito atrás. Para RAG, use trechos de até 512 tokens; o estágio de contexto longo está em treino. As tabelas abaixo são geradas a partir dos arquivos de avaliação. As ablações restantes (trilho bidirecional, contexto longo, variantes de negativos) ainda não foram executadas.
 
 **English summary.** Lumi-Embed turns [Lumi-4B](https://huggingface.co/ceia-research/lumi-4b), a 4B hybrid Mamba-2 + attention LLM for Brazilian Portuguese, into a text-embedding model:
 
@@ -43,7 +43,7 @@ datasets:
 - checkpoint merging, with checkpoints selected on a held-out dev set;
 - evaluation on MTEB-BR (22 native tasks), MTEB-PT, LongEmbed and MTEB (eng, v2), under a clean zero-shot contamination policy (a filter bug left 13 tasks unchecked; a post-hoc audit found overlaps in at most 0.1 % of the training examples, and the conclusions hold without the 4 affected tasks).
 
-**Result:** 62.41 on MTEB-BR (22 native PT-BR tasks), statistically tied with multilingual-e5-large-instruct and Qwen3-Embedding-0.6B and below Qwen3-Embedding-4B (65.53). It matches Qwen3-Embedding-4B in retrieval and has the highest classification average among the compared models; it is weakest in clustering and STS.
+**Result:** 62.41 on MTEB-BR (22 native PT-BR tasks), statistically tied with multilingual-e5-large-instruct and Qwen3-Embedding-0.6B and below Qwen3-Embedding-4B (65.53). It matches Qwen3-Embedding-4B in retrieval and has the highest classification average among the compared models; it is weakest in clustering, STS and especially long documents (trained on 512 tokens only: 47.50 vs 80.12 on LongEmbed). For RAG, use chunks of up to 512 tokens; a long-context stage is in training. MTEB (eng, v2): 63.30.
 
 As far as we know, it is one of the first evaluations of a hybrid Mamba-Transformer as a text embedder. Code, configs and data recipes: [github.com/henriquegalva0/lumi-to-emb](https://github.com/henriquegalva0/lumi-to-emb).
 
@@ -55,13 +55,13 @@ As far as we know, it is one of the first evaluations of a hybrid Mamba-Transfor
 | Embedding | estado oculto do último token (`</s>`), depois da normalização final; L2; similaridade de cosseno; dimensão 3136 |
 | Formato | query: `Instruct: {instrução}\nQuery: {query}</s>`; documento: `{texto}</s>`, sem instrução |
 | Modelo publicado | `lumi-emb` = M-C-base0.75: 0,75 × média de cinco checkpoints do S2 (C2, C2-real, C2-syn, C2-s2, C2-s3) + 0,25 × Lumi-4B sem treino (R0) |
-| Comprimento | treinado com até 512 tokens; o estágio de contexto longo (C3-long) ainda não foi treinado. No LongEmbed (32k), acerta o passkey até 8k tokens e cai a partir de 16k |
+| Comprimento | treinado com até 512 tokens; **para RAG, use trechos de até 512 tokens** (no MLDR-pt, ler o documento em até 8k piora o resultado: 61,99 → 47,88). O estágio de contexto longo (C3-long) está em treino |
 | Idiomas | português brasileiro (principal) e inglês |
 | Carregamento | transformers ≥ 5.23 nativo (`NemotronHModel`), **sem** `trust_remote_code` |
 
 ## Uso
 
-O tokenizer salvo já anexa o `</s>` e faz padding à direita. Use sempre o mesmo formato de instrução nas queries e deixe os documentos sem instrução.
+O tokenizer salvo já anexa o `</s>` e faz padding à direita. Use sempre o mesmo formato de instrução nas queries e deixe os documentos sem instrução. Em RAG, divida os documentos em trechos de até 512 tokens, o comprimento de treino: com textos mais longos, a qualidade cai.
 
 **Sentence-Transformers** (o prompt `query` traz a instrução de busca padrão):
 
@@ -221,7 +221,8 @@ Notas × 100, geradas pelos arquivos de avaliação ([tabelas completas](https:/
 
 | Modelo | MMTEB | MTEB eng v2 | LongEmbed |
 |---|---|---|---|
-| **lumi-emb** (este trabalho) | — | — | 47.50 |
+| **lumi-emb** (este trabalho) | — | 63.30 | 47.50 |
+| Qwen3-Embedding-4B | — | — | 80.12 |
 
 #### Sensibilidade à contaminação
 
@@ -236,12 +237,23 @@ A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de t
 | Qwen3-Embedding-0.6B | 61.67 | 63.15 | +0.74 | +0.64 [-2.56, +3.51] | 0.659 |
 | multilingual-e5-large-instruct | 63.65 | 65.89 | -1.25 | -2.10 [-4.99, +0.67] | 0.139 |
 
+#### MLDR-pt com documentos de até 8k tokens
+
+| Modelo | MLDR-pt, 512 tokens | MLDR-pt, 8k tokens |
+|---|---|---|
+| lumi-emb | 61.99 | 47.88 |
+| Qwen3-Embedding-4B | 66.92 | 80.23 |
+
+MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). No MTEB-PT ele é avaliado com 512 tokens, como todo o protocolo; aqui, também com os documentos em até 8k tokens.
+
 #### LongEmbed por comprimento (tokens)
 
 | Modelo | Tarefa | 256 | 512 | 1024 | 2048 | 4096 | 8192 | 16384 | 32768 |
 |---|---|---|---|---|---|---|---|---|---|
 | lumi-emb | Passkey | 96 | 96 | 100 | 100 | 100 | 100 | 66 | 48 |
 | lumi-emb | Needle | 80 | 82 | 72 | 78 | 50 | 22 | 0 | 4 |
+| Qwen3-Embedding-4B | Passkey | 100 | 98 | 98 | 94 | 100 | 96 | 90 | 96 |
+| Qwen3-Embedding-4B | Needle | 84 | 76 | 58 | 60 | 86 | 82 | 74 | 82 |
 
 #### Checkpoints deste trabalho
 
@@ -311,7 +323,7 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
 | H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
 | H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
-| H7 | Vantagem relativa em entradas longas | lumi-emb − Qwen3-Embedding-4B, LongEmbed | — | — | — |
+| H7 | Vantagem relativa em entradas longas | lumi-emb − Qwen3-Embedding-4B, LongEmbed | -32.62 | — | Refutada |
 
 "Refutada" / "Não refutada" aplicam o critério de falseamento do plano; "—" = ainda não executado.
 
@@ -334,9 +346,9 @@ A situação de cada hipótese está na tabela "Hipóteses pré-registradas", ac
 ## Limitações
 
 - **Clusterização e STS:** é onde está a maior distância para o Qwen3-Embedding-4B; só a clusterização responde por 2,7 dos 3,1 pontos da diferença média. A mistura de treino tem quase só pares de busca e de frases semelhantes, sem dados que ensinem "mesmo tema", e o treino quase não moveu a clusterização.
-- **Contexto:** o treino usou até 512 tokens. No LongEmbed, o passkey é recuperado em 100 % dos casos de 1k a 8k tokens, a janela do pré-treino contínuo do Lumi, e cai para 66 % em 16k e 48 % em 32k; o needle já cai a partir de 4k (50 %) e zera em 16k. Na Etapa 1, o backbone colapsou na geração a partir de 64k.
+- **Documentos longos:** o treino usou até 512 tokens, e o modelo não aprendeu a representar textos longos. No MLDR-pt, passar de 512 para 8k tokens derruba o lumi-emb de 61,99 para 47,88, enquanto o Qwen3-Embedding-4B sobe de 66,92 para 80,23. No LongEmbed, ele fica em 47,50 contra 80,12. Só o passkey, um fato isolado, sobrevive: 100 % de 1k a 8k tokens (a janela do pré-treino contínuo do Lumi), 66 % em 16k e 48 % em 32k; o needle cai a partir de 4k. Na Etapa 1, o backbone colapsou na geração a partir de 64k.
 - **Arquitetura:** o embedder híbrido Mamba-Transformer não tem validação prévia na literatura, e o trilho bidirecional é experimental.
-- **Retrieval em inglês:** é onde modelos recorrentes mostraram a maior lacuna. É monitorado à parte, no MTEB eng v2.
+- **Inglês:** 63,30 no MTEB (eng, v2), com 41 tarefas. Os baselines ainda não foram medidos em inglês com o nosso protocolo.
 - **Dependência do teacher:** os negativos e o filtro dos sintéticos vêm do Qwen3-Embedding-4B.
 - **Escala reduzida:** centenas de milhares de pares, contra dezenas de milhões na literatura.
 - **Dev saturado:** o dev (1.500 consultas, com 30 mil distratores fixos) fica perto de 0,977 nos candidatos ao merge. As diferenças entre eles são de milésimos, perto da variação entre sementes (0,0004 de amplitude). Ele serve para descartar candidatos ruins, mas separa pouco os bons.

@@ -16,7 +16,7 @@ Até onde sabemos, é uma das primeiras avaliações de um híbrido Mamba-Transf
 | 2. Decisão | Desenho do embedder a partir do L\* | ✅ (abaixo) | — |
 | 3. Dados | Pares naturais, sintéticos de 3 geradores, negativos minerados, descontaminação | ✅ S1 e S2; S-long pendente | [ficha dos dados](docs/embed/DATA_CARD.md) |
 | 4. Treino | LoRA contrastivo em estágios (S0, S1, S2, S-long), trilhos C e B, merges | ✅ trilho causal (C1, C2 e variantes, merge M-C); trilho B, S-long e demais ablações pendentes | [roteiro](docs/embed/PIPELINE.md) · [decisões](docs/embed/DECISIONS.md) |
-| 5. Avaliação | MTEB-BR (22 tarefas nativas), MTEB-PT, LongEmbed, MTEB eng v2, ablações | ✅ MTEB-BR e MTEB-PT; LongEmbed e MTEB eng v2 pendentes | [resultados](docs/embed/RESULTS.md) |
+| 5. Avaliação | MTEB-BR (22 tarefas nativas), MTEB-PT, LongEmbed, MTEB eng v2, MLDR-pt em 8k, ablações | ✅ lumi-emb completo; modelo longo e ablações pendentes | [resultados](docs/embed/RESULTS.md) |
 
 O desenho experimental completo das Etapas 2–5 está no [plano do experimento](docs/embed/plano_experimento.pdf).
 
@@ -99,7 +99,7 @@ Antes de publicar, todo checkpoint passa pelas verificações da seção 3.6 do 
 
 As Tabelas 12–15 do plano saem do comando `report`, **só a partir dos arquivos de resultado do mteb**: nenhuma célula é digitada à mão, e o que não foi executado aparece como "—". Elas ficam em [docs/embed/RESULTS.md](docs/embed/RESULTS.md) e no bloco de resultados do model card.
 
-O modelo publicado, **lumi-emb** (merge M-C-base0.75, escolhido no dev), fica em **62,41 no MTEB-BR**. Empata estatisticamente com o multilingual-e5-large-instruct (63,65) e o Qwen3-Embedding-0.6B (61,67) e fica abaixo do Qwen3-Embedding-4B (65,53; p = 0,03). Em retrieval, iguala o Qwen3-Embedding-4B, e tem a maior média em classificação entre os modelos comparados. A distância está quase toda em clusterização e STS. A descontaminação teve uma falha, corrigida e auditada depois do treino ([ficha dos dados](docs/embed/DATA_CARD.md#auditoria-posterior)).
+O modelo publicado, **lumi-emb** (merge M-C-base0.75, escolhido no dev), fica em **62,41 no MTEB-BR**. Empata estatisticamente com o multilingual-e5-large-instruct (63,65) e o Qwen3-Embedding-0.6B (61,67) e fica abaixo do Qwen3-Embedding-4B (65,53; p = 0,03). Em retrieval, iguala o Qwen3-Embedding-4B, e tem a maior média em classificação entre os modelos comparados. A distância está quase toda em clusterização e STS e, sobretudo, em documentos longos: treinado com 512 tokens, ele fica em 47,50 no LongEmbed contra 80,12 do Qwen3-Embedding-4B, e no MLDR-pt piora ao ler documentos de até 8k (61,99 → 47,88). Por isso o contexto longo passou ao pipeline principal (em treino). No MTEB (eng, v2), fica em 63,30. A descontaminação teve uma falha, corrigida e auditada depois do treino ([ficha dos dados](docs/embed/DATA_CARD.md#auditoria-posterior)).
 
 ---
 
