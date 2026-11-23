@@ -10,7 +10,7 @@
 #   decontam                     índice da avaliação + filtro de contaminação       (CPU)
 #   audit                        confere os conjuntos montados contra o índice     (CPU)
 #   mine                         teacher + negativos difíceis                       (GPU, vLLM)
-#   mix                          conjuntos S1, S2, ablações, R1, S-long e dev       (CPU)
+#   mix [--only long]            conjuntos S1, S2, ablações, R1, S-long e dev       (CPU)
 #   export-base                  R0 = lumi-4b sem treino, como embedder
 #   verify ID                    T1–T4 num checkpoint                               (GPU)
 #   train ID [--max-minutes N]   treina configs/embed/train/ID.yaml                 (GPU)
@@ -120,7 +120,7 @@ main() {
     decontam)    embed_env; run data decontam ;;
     audit)       embed_env; run data audit ;;
     mine)        vllm_env || die "vLLM não encontrado: rode este comando na imagem vllm/vllm-openai:v0.29.0."; gpu_banner; run data mine ;;
-    mix)         embed_env; run data mix ;;
+    mix)         embed_env; run data mix "$@" ;;
     export-base) embed_env; run export-base ;;
     verify)      embed_env; gpu_banner; run verify "$@" ;;
     train)       embed_env; gpu_banner; run train "$@" ;;

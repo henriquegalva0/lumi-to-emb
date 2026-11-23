@@ -46,6 +46,12 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **Dev com distratores fixos** (20 mil documentos de retrieval, 5 mil de STS e 5 mil de bitexto, positivos do treino sorteados por hash, gravados em `sets/dev_distractors.jsonl`) | Sem eles, cada query do dev concorria com 315 a 1.925 documentos e todos os modelos da varredura ficavam entre 0,94 e 0,98: a escolha de checkpoints e de merges cairia no ruído. A varredura de LR usou o dev antigo; do C1 em diante, todos usam o mesmo dev com distratores |
 | **Aquecimento proporcional** (`warmup_ratio: 0.1`) em vez de 100 passos fixos | Na escala reduzida, o S1 tem ~195 passos: 100 de aquecimento seriam metade do treino, e na varredura (24 passos) a taxa nunca chegaria ao valor testado |
 | **Checkpoints por tempo e `SIGTERM`** | Os jobs têm `max_time`; reenviar continua do passo salvo |
+| **Contexto longo no pipeline principal** (não mais ablação A13), antes das ablações | O objetivo do modelo é RAG. Com só 512 tokens no treino, o lumi-emb ficou em 47,50 no LongEmbed contra 80,13 do Qwen3-Embedding-4B |
+| **C3-long parte do lumi-emb** (merge M-C-base0.75), não do C2 | É o melhor modelo curto; o estágio longo é aplicado a ele |
+| **Replay de 30 % de exemplos curtos do S2 no estágio longo** (`mix.long.replay_s2`), sem os acusados pela auditoria | Evitar que o modelo esqueça os textos curtos ao aprender os longos |
+| **Dev longo como tarefa própria** (`retrieval_long`): 300 consultas, 1.000 distratores longos (positivos longos do treino), documentos codificados em 8k para todos os modelos | Os distratores curtos do dev não testam documentos longos; arquivo separado (`dev_distractors_long.jsonl`), e o dev curto continua idêntico |
+| **Merge M-L entre o C3-long e o lumi-emb**, escolhido no dev curto + longo | O modelo publicado pode ser um só, bom nos dois comprimentos; o spec (`max_length` 8192) vem do primeiro candidato, o C3-long |
+| **`mix --only long`** | Regrava só o conjunto longo; S1/S2 são recalculados (determinísticos) para as exclusões, mas não regravados |
 | **S0 (MNTP): token de máscara `<unk>`, 30 % mascarado, posição i prevista pelo logit de i − 1** | O tokenizer do Lumi não tem token de máscara. O LLM2Vec usa um token raro, e 30 % fica no meio da faixa 20–40 % do plano. Só os logits das posições mascaradas são calculados |
 
 ## Dados
@@ -77,6 +83,8 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **Três sementes do C2 avaliadas nos benchmarks** (C2, C2-s2, C2-s3) | O IC por tarefa não mede a variação entre execuções. Com as sementes, o desvio-padrão do Mean22 é 0,13: diferenças menores que ~0,3 entre checkpoints não se distinguem do acaso |
 | **Modelo publicado escolhido pela regra do dev** (`jobs/embed/choose_release.py`) | O merge, se empata ou supera o melhor checkpoint individual no dev; senão, esse checkpoint. Os benchmarks não entram, porque escolher pelo MTEB-BR seria selecionar no próprio teste. O escolhido foi o M-C-base0.75 (dev 0,9779; melhor individual, C2-real, 0,9771); a proveniência fica em `checkpoints/lumi-emb/choice.json` |
 | **A origem do lumi-emb herda as notas dele no relatório** | São os mesmos pesos: o M-C não é avaliado de novo |
+| **MLDR-pt em 8k como suíte própria** (`mldr_pt_long`, cache com sufixo `-L8192`) | No MTEB-PT o MLDR é cortado em 512 tokens, como todo o protocolo. Para medir RAG com documentos longos em português, ele é avaliado também em 8k; o sufixo no nome do modelo impede que esse resultado substitua o de 512 no cache do mteb |
+| **Filtro de contaminação refeito com o índice v2 antes do estágio longo** | Os documentos longos passam pelo índice corrigido; o relatório do filtro original fica em `report_index_v1.*` |
 | **Pesos do lumi-emb por hard link** | Copiar 8 GB na sessão de login morreu com a queda da conexão SSH; o link é instantâneo e não ocupa disco |
 
 ## O que não foi implementado (e por quê)

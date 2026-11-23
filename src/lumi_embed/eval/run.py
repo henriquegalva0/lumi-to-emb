@@ -65,6 +65,13 @@ def suite_params(ecfg: dict, suite: str, model_batch: int | None = None) -> tupl
     return max_len, bs
 
 
+def cache_name(base: str, ecfg: dict, suite: str) -> str:
+    """Nome do modelo no cache do mteb para a suíte. Com `cache_tag` (ex.: MLDR-pt em 8k), o nome ganha
+    um sufixo, para os resultados não se misturarem com os da mesma tarefa em 512 tokens."""
+    tag = ecfg["suites"][suite].get("cache_tag")
+    return f"{base}-{tag}" if tag else base
+
+
 def cap_length(model, max_len: int) -> bool:
     """Limita o comprimento de um encoder do mteb baseado em Sentence-Transformers."""
     st = getattr(model, "model", None)
@@ -85,7 +92,7 @@ def evaluate_checkpoint(cfg: dict, ckpt_id: str, suites: list[str]) -> dict:
     summary = {}
     for suite in suites:
         max_len, bs = suite_params(ecfg, suite)
-        enc = build_encoder(checkpoint_path(ckpt_id), model_name(ckpt_id), git_commit()["commit"][:12],
+        enc = build_encoder(checkpoint_path(ckpt_id), cache_name(model_name(ckpt_id), ecfg, suite), git_commit()["commit"][:12],
                             ecfg["instructions"], batch_size=bs, max_length=max_len,
                             spec_overrides=spec_override_for(ckpt_id))
         tasks = suite_tasks(ecfg, suite)
@@ -127,6 +134,9 @@ def evaluate_baseline(cfg: dict, hf_id: str, suites: list[str]) -> dict:
             model.mteb_model_meta = mteb.get_model_meta(hf_id)
         else:
             model = mteb.get_model(hf_id, revision=bcfg.get("revision"))
+        meta = getattr(model, "mteb_model_meta", None)
+        if meta is not None and cache_name(hf_id, ecfg, suite) != hf_id:
+            model.mteb_model_meta = meta.model_copy(update={"name": cache_name(meta.name, ecfg, suite)})
         if not cap_length(model, max_len):
             raise EmbedError(f"Não foi possível limitar {hf_id} a {max_len} tokens (protocolo: mesmo comprimento "
                              "para todos os modelos). Adapte cap_length() ao wrapper deste modelo.")

@@ -19,6 +19,8 @@ O ambiente de treino usa torch 2.12 porque é a versão para a qual existem os *
 setup → check → eval R0/R0e (referência zero-shot)
       → sources → synth ×3 → decontam → mine → mix
       → train R1 · C1 (varredura de LR antes) → C2 e variações → merge M-C → eval → report → publish/card
+      → contexto longo: decontam (índice v2) → mine (retrieval longo) → mix --only long → train C3-long
+        → merge M-L → eval (mldr_pt_long, longembed) → report → publish/card
       → (trilho B) train B0a → B1a → B2a → merge M-B
 ```
 
@@ -36,19 +38,22 @@ setup → check → eval R0/R0e (referência zero-shot)
 | 10 | `train C1-sweep-4.0e-4` (e `-1.2e-3`, `-2.4e-3`) | sim | Varredura de LR em 1/8 do S1 (24 passos). Copie o melhor LR no dev para `configs/embed/train/_s1.yaml` | `checkpoints/C1-sweep-*/` |
 | 11 | `train R1`, `train C1` | sim | Baseline do artigo e estágio S1 | `checkpoints/<ID>/model/` |
 | 12 | `train C2`, `C2-real`, `C2-syn`, `C2-s2`, `C2-s3` | sim | Modelo principal e candidatos do merge | idem |
-| 13 | `train C2-direct`, `C2-nohn`, `C2-naivehn`, `C2-ib`, `C2-full`, `C2-attnonly`, `C2-noinst`, `C2-mrl`, `C3-long` | sim | Ablações A1, A3, A4, A8, A10, A12 e A13 | idem |
+| 13 | `train C2-direct`, `C2-nohn`, `C2-naivehn`, `C2-ib`, `C2-full`, `C2-attnonly`, `C2-noinst`, `C2-mrl` | sim | Ablações A1, A3, A4, A8, A10 e A12 | idem |
 | 14 | `merge M-C` | sim | Média, SLERP e interpolação com o R0; escolha **no dev** | `checkpoints/M-C/`, `merge_report.json` |
 | 15 | `train B0a` → `B1a` → `B2a` (e `B2a-s2`, `B2a-eos`, `B0f`→`B1f`→`B2f`) | sim | Trilho bidirecional: MNTP, S1, S2 | idem |
 | 16 | `merge M-B` | sim | Merge do trilho Ba | `checkpoints/M-B/` |
+| 16a | `mix --only long` | não | Só o conjunto do estágio longo: exemplos longos + 30 % de replay curto do S2 (sem os acusados pela auditoria); S1/S2 ficam intactos | `data/embed/sets/long/` |
+| 16b | `train C3-long` | sim | Estágio longo (pipeline principal): parte do `lumi-emb`, currículo 2k → 4k → 8k, dev curto + longo | `checkpoints/C3-long/` |
+| 16c | `merge M-L` | sim | Grade entre o C3-long e o lumi-emb, escolhida no dev curto + longo | `checkpoints/M-L/` |
 | 17 | `verify <ID>` | sim | T1–T4 em qualquer checkpoint (obrigatório antes de publicar) | `checkpoints/<ID>/verify.json` |
-| 18 | `eval <ID> smoke mteb_br mteb_pt` (+ `longembed eng_v2` nos finalistas; `mmteb` opcional) | sim | Avaliação | `results/embed/mteb/` |
+| 18 | `eval <ID> smoke mteb_br mteb_pt` (+ `longembed eng_v2 mldr_pt_long` nos finalistas; `mmteb` opcional) | sim | Avaliação. A `mldr_pt_long` avalia o MLDR em português com documentos de até 8k tokens, num cache separado | `results/embed/mteb/` |
 | 19 | `baseline <hf_id> mteb_br mteb_pt` | sim | Modelos da Tabela 14 com o mesmo protocolo | idem |
 | 20 | `report` | não | Tabelas 12–15, `docs/embed/RESULTS.md` e o bloco de resultados do model card | `results/embed/tables/` |
 | 21 | `publish <ID>` / `publish <ID> --release` | não | Envia o checkpoint ao Hub (branch próprio) ou como release (`main`) | repositório do modelo |
 | 22 | `card` | não | Envia o model card e a documentação ao Hub | idem |
 | 23 | `hubcheck` | sim | Carrega o modelo publicado do jeito que o card ensina (Sentence-Transformers, Transformers, kernels), compara com o checkpoint local e confere os pesos de cada branch | `results/embed/hubcheck.json` |
 
-O **modelo publicado** (`lumi-emb`) é o melhor no dev entre os merges e os checkpoints finais: o merge, se empata ou supera o melhor checkpoint individual no dev; senão, esse checkpoint. Os benchmarks não entram na escolha. `python3 jobs/embed/choose_release.py` aplica a regra a partir do `merge_report.json`, cria `checkpoints/lumi-emb/` e grava a proveniência em `choice.json`. Depois, rode `verify lumi-emb`, `eval lumi-emb …` e `publish lumi-emb --release`.
+O **modelo publicado** (`lumi-emb`) é o melhor no dev entre os merges e os checkpoints finais: o merge, se empata ou supera o melhor checkpoint individual no dev; senão, esse checkpoint. Os benchmarks não entram na escolha. `python3 jobs/embed/choose_release.py` (para o modelo longo: `python3 jobs/embed/choose_release.py M-L lumi-emb-long`) aplica a regra a partir do `merge_report.json`, cria `checkpoints/lumi-emb/` e grava a proveniência em `choice.json`. Depois, rode `verify lumi-emb`, `eval lumi-emb …` e `publish lumi-emb --release`.
 
 ## Com o Sauron
 

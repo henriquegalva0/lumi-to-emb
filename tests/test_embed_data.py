@@ -157,6 +157,7 @@ def test_mix_builds_disjoint_sets_and_ablations(data_cfg, tmp_path):
     cfg = data_cfg
     cfg["mix"].update(inputs=["mined/all.jsonl"], dev_per_component=10, dev_long=5)
     cfg["mix"]["s1"]["size"], cfg["mix"]["s2"]["size"] = 200, 100
+    cfg["mix"]["long"] = {"replay_s2": 0.0}
     man = mixmod.run_mix(cfg)
 
     def load(name, split="train"):
@@ -179,7 +180,36 @@ def test_mix_builds_disjoint_sets_and_ablations(data_cfg, tmp_path):
     r1 = load("R1")
     assert len(r1) == 5 and all(len(r["negatives"]) == 63 for r in r1)
     longs = load("long")
-    assert all(r["source"].get("long") for r in longs)
+    assert all(r["source"].get("long") for r in longs)     # sem replay
+    assert all(r["task"] == mixmod.LONG_DEV_TASK for r in load("long", "dev"))
+
+
+def test_mix_only_long_adds_replay_without_touching_other_sets(data_cfg, tmp_path):
+    # O estágio longo: só o conjunto long é regravado; S1/S2 continuam idênticos. ~30 % do long é replay
+    # curto do S2, sem os exemplos acusados pela auditoria de contaminação.
+    rows = [_mined(i, c) for c in ("retrieval", "synth", "sts", "mmarco", "en", "long") for i in range(120)]
+    random.Random(0).shuffle(rows)
+    (tmp_path / "data/embed/mined").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data/embed/mined/all.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    cfg = data_cfg
+    cfg["mix"].update(inputs=["mined/all.jsonl"], dev_per_component=10, dev_long=5)
+    cfg["mix"]["s1"]["size"], cfg["mix"]["s2"]["size"] = 200, 100
+    mixmod.run_mix(cfg)
+    sets = tmp_path / "data/embed/sets"
+    before = {n: (sets / n / "train.jsonl").read_text() for n in ("S1", "S2", "S2-real")}
+    s2_ids = [json.loads(x)["id"] for x in before["S2"].splitlines()]
+    (tmp_path / "results/embed/contamination").mkdir(parents=True)
+    (tmp_path / "results/embed/contamination/audit.json").write_text(json.dumps(
+        {"sets": {"S2/train": {"hits": [{"id": i, "field": "positive", "tasks": ["Quati"]} for i in s2_ids[:50]]}}}))
+    cfg["mix"]["long"] = {"replay_s2": 0.3}
+    man = mixmod.run_mix(cfg, only=["long"])
+    assert {n: (sets / n / "train.jsonl").read_text() for n in before} == before
+    long_rows = [json.loads(x) for x in (sets / "long/train.jsonl").read_text().splitlines()]
+    replay = [r for r in long_rows if not r["source"].get("long")]
+    n_long = len(long_rows) - len(replay)
+    assert man["sets"]["long"]["replay_s2"] == len(replay) == round(n_long * 0.3 / 0.7)
+    assert not {r["id"] for r in replay} & set(s2_ids[:50]) and {r["id"] for r in replay} <= set(s2_ids)
+    assert json.loads((sets / "manifest.json").read_text())["sets"]["S2-real"]["train"] > 0
 
 
 def test_mmarco_samples_only_queries_with_triples(data_cfg, tmp_path, monkeypatch):
@@ -529,3 +559,21 @@ def test_exit_now_flushes_logs_and_output(tmp_path):
                        env={**os.environ, "PYTHONPATH": src})
     assert r.returncode == 0, r.stderr
     assert "saida padrao" in r.stdout and "gravado no log" in log.read_text()
+
+
+def test_decontam_keeps_report_of_previous_index_version(data_cfg, tmp_path, monkeypatch):
+    # Refazer o filtro com o índice corrigido não apaga o relatório do filtro original (v1).
+    from lumi_embed.data import decontaminate as dc
+
+    d = tmp_path / "results/embed/contamination"
+    d.mkdir(parents=True)
+    (d / "report.json").write_text(json.dumps({"eval_index": {"key": {"ngram": 13}, "tasks": {"Quati": 0}}}))
+    (d / "report.md").write_text("filtro original")
+    empty = {"ngrams": np.array([], dtype=np.uint64), "texts": np.array([], dtype=np.uint64),
+             "meta": {"n_texts": 0, "n_ngrams": 0, "tasks": {}, "key": {"index_version": dc.INDEX_VERSION}}}
+    monkeypatch.setattr(dc, "build_index", lambda cfg: empty)
+    data_cfg["decontamination"]["inputs"] = []
+    dc.run_decontaminate(data_cfg)
+    assert (d / "report_index_v1.md").read_text() == "filtro original"
+    assert json.loads((d / "report_index_v1.json").read_text())["eval_index"]["tasks"] == {"Quati": 0}
+    assert (d / "report.json").exists()

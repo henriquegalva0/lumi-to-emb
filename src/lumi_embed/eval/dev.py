@@ -24,6 +24,12 @@ from ..modeling.embedder import format_query
 
 DISTRACTORS_FILE = "dev_distractors.jsonl"
 DISTRACTORS_PER_TASK = {"retrieval": 20000, "sts": 5000, "bitext": 5000}
+# Dev longo (sets/long/dev.jsonl): tarefa própria, documentos codificados com até LONG_MAX_LENGTH tokens
+# e distratores longos (positivos longos do treino), em arquivo separado para não mudar o dev curto.
+LONG_TASK = "retrieval_long"
+LONG_MAX_LENGTH = 8192
+LONG_DISTRACTORS = 1000
+LONG_DISTRACTORS_FILE = "dev_distractors_long.jsonl"
 
 
 @dataclass
@@ -87,11 +93,47 @@ def dev_distractors(sets_dir: Path, per_task: dict[str, int] | None = None) -> d
     return dict(out)
 
 
-def load_dev_set(path: Path) -> DevSet:
-    """Dev de <sets>/<conjunto>/dev.jsonl com os distratores de <sets>/."""
-    path = Path(path)
-    rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
-    return DevSet(rows, dev_distractors(path.parent.parent))
+def long_distractors(sets_dir: Path, n: int = LONG_DISTRACTORS) -> list[str]:
+    """Distratores do dev longo: positivos longos do treino (sem os do replay curto), sorteados por hash."""
+    f = Path(sets_dir) / LONG_DISTRACTORS_FILE
+    if not f.exists():
+        train, dev = Path(sets_dir) / "long" / "train.jsonl", Path(sets_dir) / "long" / "dev.jsonl"
+        dev_pos = {json.loads(x)["positive"] for x in dev.read_text(encoding="utf-8").splitlines()
+                   if x.strip()} if dev.exists() else set()
+        heap: list[tuple[int, str]] = []
+        seen: set[int] = set()
+        if train.exists():
+            with open(train, encoding="utf-8") as fh:
+                for line in fh:
+                    r = json.loads(line)
+                    text = r["positive"]
+                    if not (r.get("source") or {}).get("long") or text in dev_pos:
+                        continue
+                    h = _h(text)
+                    if h in seen:
+                        continue
+                    seen.add(h)
+                    if len(heap) < n:
+                        heapq.heappush(heap, (-h, text))
+                    elif -heap[0][0] > h:
+                        heapq.heapreplace(heap, (-h, text))
+        tmp = f.with_suffix(".jsonl.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            for neg_h, text in sorted(heap, key=lambda x: -x[0]):
+                fh.write(json.dumps({"task": LONG_TASK, "text": text}, ensure_ascii=False) + "\n")
+        tmp.replace(f)
+    return [json.loads(x)["text"] for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+
+def load_dev_set(path: "Path | list[Path]") -> DevSet:
+    """Dev de <sets>/<conjunto>/dev.jsonl (um ou vários arquivos) com os distratores de <sets>/."""
+    paths = [Path(p) for p in (path if isinstance(path, (list, tuple)) else [path])]
+    rows = [json.loads(x) for p in paths for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    sets_dir = paths[0].parent.parent
+    distractors = dict(dev_distractors(sets_dir))
+    if any(r.get("task") == LONG_TASK for r in rows):
+        distractors[LONG_TASK] = long_distractors(sets_dir)
+    return DevSet(rows, distractors)
 
 
 def _group(rows: list[dict]) -> dict[str, list[dict]]:
@@ -135,7 +177,10 @@ def dev_eval(model, rows: "list[dict] | DevSet", batch_size: int = 64, k: int = 
         else:
             doc_inputs = docs
         q = model.encode(queries, batch_size=batch_size)
-        d = model.encode(doc_inputs, batch_size=batch_size)
+        if task == LONG_TASK:  # documentos de até 8k tokens, iguais para todos os modelos comparados
+            d = model.encode(doc_inputs, batch_size=max(1, batch_size // 16), max_length=LONG_MAX_LENGTH)
+        else:
+            d = model.encode(doc_inputs, batch_size=batch_size)
         scores = q @ d.T
         tgt = torch.tensor(targets)
         pos_scores = scores[torch.arange(len(items)), tgt].unsqueeze(1)

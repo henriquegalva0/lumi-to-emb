@@ -167,8 +167,8 @@ mining:                             # seção 2.4
   gpu_memory_utilization: 0.45      # o resto da GPU fica para a busca top-k
   embed_chunk: 16384                # textos por chamada ao teacher (limita a RAM das listas do vLLM)
   embed_chunk_long: 2048            # idem, na família de documentos longos (progresso mais frequente no log)
-  defer_families: [retrieval_long]  # só o C3-long (ablação A13) usa; o 1º job travou nela por 8 h sem saída.
-                                    # Na fase das ablações: esvaziar a lista e rodar `mine` de novo (o resto é pulado)
+  defer_families: []                # retrieval_long foi adiada no 1º job (8 h sem saída); agora é minerada
+                                    # (famílias já mineradas são puladas; o progresso aparece no log)
   search_top: 64
   store_negatives: 8
   percpos: 0.95                     # TopK-PercPos
@@ -182,6 +182,8 @@ mix:                                # Tabela 3 do plano
   inputs: [mined/retrieval.jsonl, mined/retrieval_long.jsonl, mined/sts.jsonl, mined/bitext.jsonl]
   dev_per_component: 300
   dev_long: 300
+  long:
+    replay_s2: 0.3                  # fração do conjunto longo com exemplos curtos do S2 (não esquecer o curto)
   s1:
     size: 400000
     negatives: 1

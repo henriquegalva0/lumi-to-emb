@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("data", help="pipeline de dados")
     p.add_argument("step", choices=["sources", "synth", "decontam", "audit", "mine", "mix"])
-    p.add_argument("--only", default=None, help="sources: lista separada por vírgulas")
+    p.add_argument("--only", default=None, help="sources/mix: lista separada por vírgulas (mix: conjuntos a gravar)")
     p.add_argument("--generator", default=None, help="synth: chave do gerador (configs/embed/data.yaml)")
 
     sub.add_parser("export-base", help="exporta o lumi-4b sem treino como checkpoint R0")
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.step == "mix":
                 from .data.mix import run_mix
 
-                run_mix(cfg)
+                run_mix(cfg, args.only.split(",") if args.only else None)
         elif args.cmd == "export-base":
             from .verify import export_base
 

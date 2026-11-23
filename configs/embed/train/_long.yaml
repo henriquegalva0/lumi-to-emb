@@ -1,7 +1,9 @@
-# Estágio S-long (opcional): mesmo objetivo do S2 com documentos de 2k a 8k tokens e currículo
-# de comprimento 2k → 4k → 8k. Lembrete da Etapa 1: o Lumi colapsa na geração a partir de 64k.
+# Estágio S-long (parte do pipeline principal): mesmo objetivo do S2 com documentos de 2k a 8k tokens,
+# currículo de comprimento 2k → 4k → 8k e ~30 % de exemplos curtos do S2 (replay), para não esquecer o
+# curto. O dev junta o S2 (curto) e o longo (tarefa retrieval_long, documentos em 8k).
+# Lembrete da Etapa 1: o Lumi colapsa na geração a partir de 64k.
 inherit: _s2.yaml
-data: {train: sets/long/train.jsonl, dev: sets/long/dev.jsonl, negatives_per_example: 4}
+data: {train: sets/long/train.jsonl, dev: [sets/S2/dev.jsonl, sets/long/dev.jsonl], negatives_per_example: 4}
 embedding: {max_length: 8192}
 train:
   stage: long

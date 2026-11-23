@@ -1,3 +1,4 @@
-# A13: contexto longo a partir do C2.
+# Contexto longo, parte do pipeline principal: parte do lumi-emb (merge M-C-base0.75, o melhor modelo
+# curto) e treina o S-long. Antes era a ablação A13, a partir do C2.
 inherit: _long.yaml
-init: ckpt:C2
+init: ckpt:lumi-emb

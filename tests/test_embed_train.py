@@ -246,3 +246,76 @@ def test_dev_distractors_fixed_and_enlarge_the_pool(tiny_dir, tmp_path):
     hard = dev_eval(m, load_dev_set(sets / "S1" / "dev.jsonl"))
     for task in plain["tasks"]:
         assert hard["tasks"][task]["pool"] > plain["tasks"][task]["pool"]
+
+
+def test_long_dev_has_own_task_distractors_and_length(tiny_dir, tmp_path):
+    # Dev do estágio longo: tarefa retrieval_long, distratores longos próprios (positivos longos do treino,
+    # sem o replay curto), documentos codificados com até 8k tokens; o dev curto não muda.
+    from lumi_embed.eval import dev as devmod
+
+    sets = tmp_path / "sets"
+    _write_set(sets / "S2" / "train.jsonl", 30, seed=2)
+    short_dev = _write_set(sets / "S2" / "dev.jsonl", 6, seed=5)
+    longs = _write_set(sets / "long" / "train.jsonl", 20, seed=7)
+    rows = [{**r, "source": {"long": i % 4 != 0}} for i, r in enumerate(longs)]   # 1 em 4 = replay curto
+    (sets / "long" / "train.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    ldev = _write_set(sets / "long" / "dev.jsonl", 4, seed=9)
+    (sets / "long" / "dev.jsonl").write_text("\n".join(json.dumps({**r, "task": devmod.LONG_TASK}) for r in ldev) + "\n")
+    d = devmod.load_dev_set([sets / "S2" / "dev.jsonl", sets / "long" / "dev.jsonl"])
+    assert len(d.rows) == len(short_dev) + len(ldev)
+    longd = d.distractors[devmod.LONG_TASK]
+    assert set(longd) <= {r["positive"] for r in rows if r["source"]["long"]} and len(longd) == 15
+    assert (sets / devmod.LONG_DISTRACTORS_FILE).exists() and (sets / devmod.DISTRACTORS_FILE).exists()
+
+    m = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, use_hub_kernels=False)
+    seen = []
+    enc = m.encode
+    m.encode = lambda texts, **kw: (seen.append(kw.get("max_length")), enc(texts, **kw))[1]
+    res = dev_eval(m, d)
+    assert devmod.LONG_TASK in res["tasks"] and "retrieval" in res["tasks"]
+    assert devmod.LONG_MAX_LENGTH in seen
+
+
+def test_long_stage_then_merge_with_short_and_long_dev(tiny_dir, tmp_path, monkeypatch):
+    # Bloco de contexto longo em miniatura: treino com currículo de comprimento e dev curto + longo a partir
+    # de um checkpoint (ckpt:lumi-emb), depois o merge M-L (dev em lista, sem âncora) e o spec do longo.
+    from lumi_embed.eval import dev as devmod
+    from lumi_embed.merge.run import run_merge_grid
+    from lumi_embed.train.contrastive import train
+    from lumi_embed.utils import ckpt_dir
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    sets = tmp_path / "data/embed/sets"
+    _write_set(sets / "S2" / "train.jsonl", 20, seed=2)
+    _write_set(sets / "S2" / "dev.jsonl", 6, seed=5)
+    rows = _write_set(sets / "long" / "train.jsonl", 16, seed=7)
+    (sets / "long" / "train.jsonl").write_text("\n".join(
+        json.dumps({**r, "source": {"long": True}, "positive": r["positive"] * 6}) for r in rows) + "\n")
+    ldev = _write_set(sets / "long" / "dev.jsonl", 4, seed=9)
+    (sets / "long" / "dev.jsonl").write_text("\n".join(
+        json.dumps({**r, "task": devmod.LONG_TASK, "positive": r["positive"] * 6}) for r in ldev) + "\n")
+    base = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, use_hub_kernels=False)
+    save_embedder(base, ckpt_dir("lumi-emb") / "model", meta={"seed": 0}, dtype=torch.float32)
+
+    cfg = {
+        "seed": 3, "init": "ckpt:lumi-emb", "model": {"use_hub_kernels": False},
+        "embedding": {"direction": "C", "pooling": "eos", "max_length": 8192},
+        "data": {"train": "sets/long/train.jsonl", "dev": ["sets/S2/dev.jsonl", "sets/long/dev.jsonl"],
+                 "negatives_per_example": 2},
+        "loss": {"mode": "hn", "temperature": 0.05},
+        "train": {"method": "lora", "lr": 1e-3, "batch_size": 8, "micro_batch": 2, "epochs": 1, "warmup_steps": 1,
+                  "eval_every": 1, "lora": TINY_LORA, "gradient_checkpointing": False,
+                  "length_schedule": [[0.0, 16], [0.5, 64]]},
+    }
+    out = train(cfg, "C3-long", dev_eval_fn=dev_eval)
+    log = [json.loads(x) for x in (out.parent / "train_log.jsonl").read_text().splitlines()]
+    assert all(devmod.LONG_TASK in r["dev"]["tasks"] and "retrieval" in r["dev"]["tasks"] for r in log)
+    assert json.loads((out / "lumi_embed.json").read_text())["max_length"] == 8192
+
+    rep = run_merge_grid({"name": "M-L", "candidates": ["C3-long", "lumi-emb"],
+                          "slerp_pairs": [["C3-long", "lumi-emb"]], "slerp_t": [0.5],
+                          "dev": ["sets/S2/dev.jsonl", "sets/long/dev.jsonl"]})
+    assert set(rep["dev"]) == {"C3-long", "lumi-emb", "M-L-avg", "M-L-slerp-C3-long-lumi-emb-t0.5"}
+    assert all(devmod.LONG_TASK in r["tasks"] for r in rep["dev"].values())
+    spec = json.loads((ckpt_dir("M-L") / "model" / "lumi_embed.json").read_text())
+    assert spec["max_length"] == 8192   # o spec do resultado vem do primeiro candidato (o longo)

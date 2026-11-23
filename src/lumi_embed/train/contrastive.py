@@ -200,8 +200,9 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
     data = load_examples(resolve_data(cfg["data"]["train"]), cfg["data"].get("limit"))
     dev = None
     if cfg["data"].get("dev") and dev_eval_fn is not None:
-        devp = resolve_data(cfg["data"]["dev"])
-        if devp.exists():
+        dv = cfg["data"]["dev"]
+        devp = [resolve_data(x) for x in (dv if isinstance(dv, list) else [dv])]
+        if all(x.exists() for x in devp):
             from ..eval.dev import load_dev_set
 
             dev = load_dev_set(devp)

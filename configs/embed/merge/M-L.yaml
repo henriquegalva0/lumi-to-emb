@@ -1,0 +1,8 @@
+# Merge do modelo longo com o curto (pipeline principal de contexto longo). Escolha no dev que junta o
+# S2 (curto) e o longo. O C3-long vem primeiro: o spec (max_length 8192) e os arquivos do
+# Sentence-Transformers do resultado vêm do primeiro candidato.
+name: M-L
+candidates: [C3-long, lumi-emb]
+slerp_pairs: [[C3-long, lumi-emb]]
+slerp_t: [0.25, 0.5, 0.75]
+dev: [sets/S2/dev.jsonl, sets/long/dev.jsonl]

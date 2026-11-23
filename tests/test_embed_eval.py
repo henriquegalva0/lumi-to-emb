@@ -218,3 +218,39 @@ def test_scores_filtered_by_language_and_merged_across_revisions(tmp_path):
     assert load_scores(tmp_path, "lumi-embed/lumi-emb", ("por",)) == {"MassiveIntentClassification": 0.68}
     assert load_scores(tmp_path, "lumi-embed/lumi-emb", ("eng",)) == {"MassiveIntentClassification": 0.72}
     assert abs(load_scores(tmp_path, "lumi-embed/lumi-emb")["MassiveIntentClassification"] - 0.70) < 1e-9
+
+
+def test_long_suite_cache_name_and_mldr_table(tmp_path, monkeypatch):
+    # O MLDR-pt em 8k tem cache próprio (sufixo L8192): não sobrescreve o MLDR em 512 do MTEB-PT, e o
+    # relatório mostra os dois lado a lado; o lumi-emb-long herda as notas da origem (choice.json).
+    from lumi_embed.eval.run import cache_name
+    from lumi_embed.utils import load_config
+
+    ecfg = load_config("eval.yaml")["eval"]
+    assert cache_name("lumi-embed/lumi-emb", ecfg, "mldr_pt_long") == "lumi-embed/lumi-emb-L8192"
+    assert cache_name("lumi-embed/lumi-emb", ecfg, "mteb_br") == "lumi-embed/lumi-emb"
+    s = ecfg["suites"]["mldr_pt_long"]
+    assert s["max_length"] == 8192 and s["languages"] == ["por"]
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    cache = tmp_path / "results" / "embed" / "mteb"
+
+    def put(model, score):
+        d = cache / "results" / model.replace("/", "__") / "rev1"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "MultiLongDocRetrieval.json").write_text(json.dumps({"task_name": "MultiLongDocRetrieval", "scores": {
+            "test": [{"main_score": score, "hf_subset": "pt", "languages": ["por-Latn"]}]}}))
+
+    put("lumi-embed/lumi-emb", 0.30)
+    put("lumi-embed/lumi-emb-L8192", 0.20)
+    put("lumi-embed/M-L-L8192", 0.45)
+    put(rep.QWEN4B, 0.40)
+    put(rep.QWEN4B + "-L8192", 0.60)
+    rel = tmp_path / "checkpoints" / "lumi-emb-long"
+    rel.mkdir(parents=True)
+    (rel / "choice.json").write_text(json.dumps({"source": "M-L", "merge_selected_variant": "M-L-avg"}))
+    S = rep.collect([rep.QWEN4B])
+    rows = {r[0]: r for r in rep.mldr_long_rows(S, [rep.QWEN4B])}
+    assert rows["lumi-emb"][1:] == ["30.00", "20.00"]
+    assert rows["Qwen3-Embedding-4B"][1:] == ["40.00", "60.00"]
+    assert rows["M-L"][2] == "45.00" and "C3-long" not in rows

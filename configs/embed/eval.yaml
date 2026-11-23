@@ -13,6 +13,9 @@ eval:
     mteb_br: {mteb_br: all}        # 22 tarefas nativas (arXiv:2607.04581) — principal
     mteb_pt: {benchmark: "MTEB(por, v1)"}   # 14 datasets (arXiv:2607.04071)
     longembed: {benchmark: LongEmbed, max_length: 32768, batch_size: 1}
+    # RAG com documentos longos em português: o MLDR-pt (no MTEB-PT ele é cortado em 512 tokens) em 8k.
+    # cache_tag separa estes resultados dos de 512 no cache do mteb (o nome do modelo ganha o sufixo).
+    mldr_pt_long: {tasks: [MultiLongDocRetrieval], languages: [por], max_length: 8192, batch_size: 4, cache_tag: L8192}
     eng_v2: {benchmark: "MTEB(eng, v2)"}
     mmteb: {benchmark: "MTEB(Multilingual, v2)"}
   instructions:

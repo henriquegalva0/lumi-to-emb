@@ -8,7 +8,8 @@ Componentes (atribuídos pela origem de cada exemplo):
   en_bitext        inglês (GooAQ, AllNLI) e bitexto PT↔EN
   labeled_pt       rotulados em PT — vazio por política (todos os candidatos são tarefas de
                    avaliação; ver docs). A proporção dele é redistribuída e o desvio registrado.
-  long             consultas sobre trechos de documentos longos (S-long)
+  long             consultas sobre trechos de documentos longos (S-long), mais uma fração de
+                   exemplos curtos do S2 ("replay"), para o estágio longo não esquecer os textos curtos
 
 O dev é separado primeiro (queries nunca vistas no treino), depois o S2 e por fim o S1, de
 forma que os estágios não compartilhem exemplos. As variantes de ablação (S2-real, S2-syn,
@@ -23,7 +24,7 @@ import logging
 import random
 from collections import defaultdict
 
-from ..utils import EmbedError, data_dir, iter_jsonl, write_json
+from ..utils import EmbedError, data_dir, iter_jsonl, results_dir, write_json
 
 log = logging.getLogger("lumi_embed.mix")
 
@@ -89,6 +90,18 @@ def allocate(pools: dict[str, list[dict]], proportions: dict[str, float], size: 
     return out, info
 
 
+LONG_DEV_TASK = "retrieval_long"  # no dev, o longo é uma tarefa à parte (métrica e distratores próprios)
+
+
+def audit_hit_ids(set_key: str = "S2/train") -> set[str]:
+    """Ids de exemplos acusados pela auditoria de contaminação (ficam fora do replay)."""
+    f = results_dir("contamination", "audit.json")
+    if not f.exists():
+        return set()
+    sets = json.loads(f.read_text()).get("sets") or {}
+    return {h["id"] for h in (sets.get(set_key) or {}).get("hits") or [] if h.get("id")}
+
+
 def _write(name: str, split: str, rows: list[dict]) -> int:
     path = data_dir("sets", name, f"{split}.jsonl")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,8 +111,14 @@ def _write(name: str, split: str, rows: list[dict]) -> int:
     return len(rows)
 
 
-def run_mix(cfg: dict) -> dict:
+def run_mix(cfg: dict, only: list[str] | None = None) -> dict:
+    """Monta todos os conjuntos; com `only`, grava só os pedidos (os outros são recalculados, de forma
+    determinística, para as exclusões entre conjuntos, mas não regravados) e atualiza o manifesto."""
     mcfg = cfg["mix"]
+
+    def put(name: str, split: str, rows: list[dict]) -> int:
+        return len(rows) if only and name not in only else _write(name, split, rows)
+
     seed = int(cfg.get("seed", 1234))
     pools: dict[str, list[dict]] = defaultdict(list)
     for f in mcfg["inputs"]:
@@ -140,26 +159,38 @@ def run_mix(cfg: dict) -> dict:
     rng = random.Random(seed)
     for rows in (s1, s2):
         rng.shuffle(rows)
-    manifest["sets"]["S1"] = {**info1, "train": _write("S1", "train", s1), "dev": _write("S1", "dev", dev)}
-    manifest["sets"]["S2"] = {**info2, "train": _write("S2", "train", s2), "dev": _write("S2", "dev", dev)}
+    manifest["sets"]["S1"] = {**info1, "train": put("S1", "train", s1), "dev": put("S1", "dev", dev)}
+    manifest["sets"]["S2"] = {**info2, "train": put("S2", "train", s2), "dev": put("S2", "dev", dev)}
 
     # ablações derivadas do S2 (mesmos exemplos, ou mesma escala a partir de um só tipo de dado)
     k2 = int(mcfg["s2"]["negatives"])
     by_id = {e["id"]: e for c in pools.values() for e in c}
     naive = [x for x in (_with_negs(by_id[r["id"]], "naive_negatives", k2) for r in s2) if x]
-    manifest["sets"]["S2-naivehn"] = {"train": _write("S2-naivehn", "train", naive)}
+    manifest["sets"]["S2-naivehn"] = {"train": put("S2-naivehn", "train", naive)}
     nohn = [{**r, "negatives": []} for r in s2]
-    manifest["sets"]["S2-nohn"] = {"train": _write("S2-nohn", "train", nohn)}
+    manifest["sets"]["S2-nohn"] = {"train": put("S2-nohn", "train", nohn)}
     for name, comps in (("S2-real", REAL), ("S2-syn", SYNTH)):
         props = {c: p for c, p in mcfg["s2"]["proportions"].items() if c in comps}
         used = {r["id"] for r in s1} | {r["id"] for r in dev}  # podem repetir exemplos do S2, nunca do S1/dev
         rows, info = allocate(pools, props, int(mcfg["s2"]["size"]), k2, set(used))
         rng.shuffle(rows)
-        manifest["sets"][name] = {**info, "train": _write(name, "train", rows)}
+        manifest["sets"][name] = {**info, "train": put(name, "train", rows)}
 
-    # contexto longo
+    # contexto longo: exemplos longos + replay de exemplos curtos do S2 (sem os acusados pela auditoria)
     longs = [x for x in (_with_negs(e, "negatives", k2) for e in pools.get("long", []) if e["id"] not in taken) if x]
-    manifest["sets"]["long"] = {"train": _write("long", "train", longs), "dev": _write("long", "dev", long_dev)}
+    frac = float((mcfg.get("long") or {}).get("replay_s2", 0.0))
+    replay, excluded = [], audit_hit_ids()
+    if longs and frac > 0:
+        cand = [r for r in s2 if r["id"] not in excluded]
+        n_rep = min(len(cand), int(round(len(longs) * frac / (1 - frac))))
+        replay = random.Random(seed + 17).sample(cand, n_rep)
+    long_train = longs + replay
+    random.Random(seed + 18).shuffle(long_train)
+    long_dev_rows = [{**r, "task": LONG_DEV_TASK} for r in long_dev]
+    manifest["sets"]["long"] = {"train": put("long", "train", long_train),
+                                "dev": put("long", "dev", long_dev_rows),
+                                "long_examples": len(longs), "replay_s2": len(replay),
+                                "replay_fraction": frac, "replay_excluded_by_audit": len(excluded)}
 
     # R1: receita do Mamba Retriever (mMARCO-PT + negativos BM25 oficiais)
     r1_path = data_dir(mcfg["r1_input"])
@@ -170,7 +201,13 @@ def run_mix(cfg: dict) -> dict:
                 item = {k: v for k, v in ex.items() if k not in ("bm25_negatives", "negatives")}
                 item["negatives"] = [{"text": t, "score": None} for t in ex["bm25_negatives"][: int(mcfg["r1_negatives"])]]
                 r1.append(item)
-        manifest["sets"]["R1"] = {"train": _write("R1", "train", r1)}
+        manifest["sets"]["R1"] = {"train": put("R1", "train", r1)}
+    if only:  # mantém o registro dos conjuntos que não foram regravados
+        old_file = data_dir("sets", "manifest.json")
+        old = json.loads(old_file.read_text()) if old_file.exists() else {"sets": {}}
+        old.setdefault("sets", {}).update({k: v for k, v in manifest["sets"].items() if k in only})
+        old["pool_sizes"] = manifest["pool_sizes"]
+        manifest = old
     write_json(data_dir("sets", "manifest.json"), manifest)
     log.info("Conjuntos: %s", {k: v.get("train") for k, v in manifest["sets"].items()})
     return manifest

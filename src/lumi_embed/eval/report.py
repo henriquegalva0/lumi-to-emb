@@ -28,7 +28,9 @@ from .stats import bootstrap_mean, load_scores, paired_bootstrap
 log = logging.getLogger("lumi_embed.report")
 
 CHECKPOINTS = ["R0", "R0e", "R1", "C1", "C2", "C2-s2", "C2-s3", "C2-real", "C2-syn", "C2-nohn", "C2-naivehn",
-               "C2-ib", "C2-direct", "C3-long", "B2a", "B2f", "M-C", "M-B", "lumi-emb"]
+               "C2-ib", "C2-direct", "C3-long", "B2a", "B2f", "M-C", "M-B", "M-L", "lumi-emb", "lumi-emb-long"]
+RELEASES = ["lumi-emb", "lumi-emb-long"]  # cópias de um checkpoint escolhido (choice.json)
+LONG_TAG = "L8192"                         # sufixo do cache do MLDR-pt em 8k (eval.yaml, mldr_pt_long)
 SEEDS = ["C2", "C2-s2", "C2-s3"]  # mesma receita, sementes 1–3: variação entre execuções
 MTEB_BR_CATEGORIES = {
     "Classificação (4)": ["HateBR", "ToxSynPT", "FactckBrClassification", "PortuLexRRIP"],
@@ -89,6 +91,9 @@ LITERATURE = [
      "mmteb": "55.2 / 59.4 (eixo tarefa) [5]", "longembed": "40.8 / 44.5 [5]", "hf": None},
 ]
 BASELINE_NAMES = {m["hf"]: m["model"] for m in LITERATURE if m["hf"]}
+MLDR_HEAD = ["Modelo", "MLDR-pt, 512 tokens", "MLDR-pt, 8k tokens"]
+MLDR_NOTE = ("MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). No MTEB-PT ele é "
+             "avaliado com 512 tokens, como todo o protocolo; aqui, também com os documentos em até 8k tokens.")
 CONTAM_NOTE = ("A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de treino que "
                "coincidem com textos destas tarefas, que o índice usado no filtro não cobria: {tasks}. São no "
                "máximo 0,1 % dos exemplos de cada conjunto. Para medir o efeito, a média é refeita sem essas "
@@ -181,17 +186,30 @@ def collect(extra_models: list[str] | None = None, languages: tuple[str, ...] | 
     S = {c: load_scores(cache, model_name(c), languages) for c in CHECKPOINTS}
     for m in extra_models or []:
         S[m] = load_scores(cache, m, languages)
-    src = release_info().get("source")
-    if src in S and src != "lumi-emb":
-        if S["lumi-emb"] and not S[src]:
-            S[src] = S["lumi-emb"]
-        elif S[src] and not S["lumi-emb"]:
-            S["lumi-emb"] = S[src]
+    for rel in RELEASES:
+        src = release_info(rel).get("source")
+        if src in S and src != rel:
+            if S[rel] and not S[src]:
+                S[src] = S[rel]
+            elif S[src] and not S[rel]:
+                S[rel] = S[src]
     return S
 
 
-def release_info() -> dict:
-    return _json(ckpt_dir("lumi-emb") / "choice.json")
+def release_info(name: str = "lumi-emb") -> dict:
+    return _json(ckpt_dir(name) / "choice.json")
+
+
+def mldr_long_rows(S: dict, baselines: list[str]) -> list[list]:
+    """MLDR-pt em 512 (MTEB-PT) e em 8k (suíte mldr_pt_long), para quem tem o resultado em 8k."""
+    rows = []
+    models = [(c, c, model_name(c)) for c in ("lumi-emb", "C3-long", "M-L", "lumi-emb-long")]
+    models += [(BASELINE_NAMES[b], b, b) for b in baselines]
+    for label, c, name in models:
+        long = load_scores(results_dir("mteb"), f"{name}-{LONG_TAG}", PT).get("MultiLongDocRetrieval")
+        if long is not None:
+            rows.append([label, _pct(S.get(c, {}).get("MultiLongDocRetrieval")), _pct(long)])
+    return rows
 
 
 def suite_lists() -> dict[str, list[str]]:
@@ -363,6 +381,10 @@ def build_report(ecfg: dict) -> str:
     if rel:
         md.append(f"O **lumi-emb** é o checkpoint `{rel.get('source')}` "
                   f"({rel.get('merge_selected_variant')}), escolhido no dev pela regra: {rel.get('rule')}\n")
+    rel_long = release_info("lumi-emb-long")
+    if rel_long:
+        md.append(f"O **lumi-emb-long** é o checkpoint `{rel_long.get('source')}` "
+                  f"({rel_long.get('merge_selected_variant')}), escolhido no dev curto + longo pela mesma regra.\n")
 
     # Tabela 12 — visão geral
     h12 = ["Modelo", "MTEB-BR Mean22 [IC 95%]"] + list(MTEB_PT_FAMILIES) + list(EXTRA_SUITES.values())
@@ -433,8 +455,15 @@ def build_report(ecfg: dict) -> str:
         _write_csv(tables / "table14b_paired.csv", h14b, rows14b)
         md += ["## Tabela 14b — Comparação pareada no MTEB-BR\n", _table(h14b, rows14b), ""]
 
+    # MLDR-pt em 8k (RAG com documentos longos)
+    rml = mldr_long_rows(S, baselines)
+    if rml:
+        _write_csv(tables / "mldr_pt_long.csv", MLDR_HEAD, rml)
+        md += ["## MLDR-pt com documentos de até 8k tokens\n", _table(MLDR_HEAD, rml), "", MLDR_NOTE, ""]
+
     # LongEmbed por comprimento
-    lemb_models = [("lumi-emb", model_name("lumi-emb"))] + [(BASELINE_NAMES[b], b) for b in baselines]
+    lemb_models = [(c, model_name(c)) for c in ("lumi-emb", "C3-long", "lumi-emb-long")] \
+        + [(BASELINE_NAMES[b], b) for b in baselines]
     hl, rl = lemb_length_rows(lemb_models)
     if rl:
         _write_csv(tables / "longembed_by_length.csv", hl, rl)
@@ -480,10 +509,11 @@ def build_report(ecfg: dict) -> str:
                      js.get("steps", "—"), js.get("train_minutes", "—"), note])
     if rdev:
         md += ["## Dev set (seleção de checkpoints)\n", _table(hdev, rdev), ""]
-    hg, rg = merge_grid()
-    if rg:
-        _write_csv(tables / "merge_grid_M-C.csv", hg, rg)
-        md += ["## Grade do merge M-C (dev)\n", _table(hg, rg), ""]
+    for mname in ("M-C", "M-L"):
+        hg, rg = merge_grid(mname)
+        if rg:
+            _write_csv(tables / f"merge_grid_{mname}.csv", hg, rg)
+            md += [f"## Grade do merge {mname} (dev)\n", _table(hg, rg), ""]
 
     text = "\n".join(md) + "\n"
     out = REPO_ROOT / "docs" / "embed" / "RESULTS.md"
@@ -502,8 +532,8 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev, xmean) -> s
           "para todos os modelos: mesmas instruções em português, só na query, e até 512 tokens. IC 95 % e "
           "p-valores por bootstrap sobre as tarefas, como no MTEB-BR.\n"]
     order = sorted(measured, key=lambda b: -_mean(S[b], MTEB_BR_TASKS))
-    models = [("**lumi-emb** (este trabalho)", "lumi-emb")] + [(BASELINE_NAMES[b], b) for b in order] \
-        + [("Lumi-4B sem treino (R0)", "R0")]
+    models = [("**lumi-emb-long** (este trabalho)", "lumi-emb-long"), ("**lumi-emb** (este trabalho)", "lumi-emb")] \
+        + [(BASELINE_NAMES[b], b) for b in order] + [("Lumi-4B sem treino (R0)", "R0")]
     h = ["Modelo", "Mean22 [IC 95%]"] + [k.replace("Clusterização", "Clust.") for k in MTEB_BR_CATEGORIES]
     rows = [[n, _ci(_mean22(S[c]))] + [_pct(_mean(S[c], ts), 1) for ts in MTEB_BR_CATEGORIES.values()]
             for n, c in models]
@@ -523,7 +553,10 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev, xmean) -> s
     if rcn:
         md += ["#### Sensibilidade à contaminação\n", CONTAM_NOTE.format(tasks=", ".join(flagged)), "",
                _table(hcn, rcn), ""]
-    hl, rl = lemb_length_rows([("lumi-emb", model_name("lumi-emb"))]
+    rml = mldr_long_rows(S, list(BASELINE_NAMES))
+    if rml:
+        md += ["#### MLDR-pt com documentos de até 8k tokens\n", _table(MLDR_HEAD, rml), "", MLDR_NOTE, ""]
+    hl, rl = lemb_length_rows([(c, model_name(c)) for c in ("lumi-emb", "C3-long", "lumi-emb-long")]
                               + [(BASELINE_NAMES[b], b) for b in BASELINE_NAMES])
     if rl:
         md += ["#### LongEmbed por comprimento (tokens)\n", _table(hl, rl), ""]
@@ -535,9 +568,10 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev, xmean) -> s
             rc.append(row)
     md += ["#### Checkpoints deste trabalho\n",
            _table(["Checkpoint", "MTEB-BR Mean22 [IC 95%]", "dev nDCG@10", "Observação"], rc), ""]
-    hg, rg = merge_grid()
-    if rg:
-        md += ["#### Grade do merge M-C (dev)\n", _table(hg, rg), ""]
+    for mname in ("M-C", "M-L"):
+        hg, rg = merge_grid(mname)
+        if rg:
+            md += [f"#### Grade do merge {mname} (dev)\n", _table(hg, rg), ""]
     if seeds:
         hs, rs = seeds
         md += ["#### Variação entre sementes (C2)\n", _table(hs, rs[:1 + len(MTEB_BR_CATEGORIES)]), ""]

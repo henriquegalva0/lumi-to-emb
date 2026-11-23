@@ -253,8 +253,24 @@ def check_dataset_exclusions(cfg: dict, files: list[str]) -> list[str]:
     return sorted(hits)
 
 
+def _keep_previous_report() -> None:
+    """Guarda o relatório de um filtro com outra versão do índice (report_index_v<N>.*) antes de sobrescrever."""
+    old = results_dir("contamination", "report.json")
+    if not old.exists():
+        return
+    ver = json.loads(old.read_text()).get("eval_index", {}).get("key", {}).get("index_version", 1)
+    if ver == INDEX_VERSION:
+        return
+    for ext in ("json", "md"):
+        f = results_dir("contamination", f"report.{ext}")
+        dst = results_dir("contamination", f"report_index_v{ver}.{ext}")
+        if f.exists() and not dst.exists():
+            f.replace(dst)
+
+
 def run_decontaminate(cfg: dict) -> dict:
     dcfg = cfg["decontamination"]
+    _keep_previous_report()
     files = [f for f in dcfg["inputs"] if data_dir(f).exists()]
     hits = check_dataset_exclusions(cfg, files)
     if hits:
@@ -393,7 +409,9 @@ def audit_focus(index: dict) -> list[str]:
 
     Não depende de qual execução refez o índice (um job reiniciado já encontraria os caches prontos).
     """
-    rep = results_dir("contamination", "report.json")
+    rep = results_dir("contamination", "report_index_v1.json")  # filtro original, se já foi refeito
+    if not rep.exists():
+        rep = results_dir("contamination", "report.json")
     if rep.exists():
         tasks = json.loads(rep.read_text()).get("eval_index", {}).get("tasks", {})
         focus = sorted(t for t, c in tasks.items() if c == 0)

@@ -44,12 +44,13 @@ def run_merge_grid(cfg: dict) -> dict:
             variants[vid] = mg.slerp_merge(paths[a], paths[b], float(t), ckpt_dir(vid) / "model",
                                            recipe={"pair": [a, b]})
     anchor = cfg.get("anchor")
-    if anchor:
+    if anchor and cfg.get("base_lambdas"):
         for lam in cfg.get("base_lambdas", []):
             vid = f"{name}-base{lam}"
             variants[vid] = mg.base_interp(_model(anchor), ckpt_dir(f"{name}-avg") / "model", float(lam),
                                            ckpt_dir(vid) / "model", recipe={"anchor": anchor, "of": f"{name}-avg"})
-    dev_rows = load_dev_set(data_dir(cfg["dev"]))
+    dv = cfg["dev"]
+    dev_rows = load_dev_set([data_dir(x) for x in (dv if isinstance(dv, list) else [dv])])
     scored = {}
     for vid, path in {**{c: p for c, p in paths.items()}, **variants}.items():
         m = LumiEmbedder.from_pretrained(str(path), device="cuda" if torch.cuda.is_available() else "cpu")
