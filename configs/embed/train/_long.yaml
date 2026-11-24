@@ -9,5 +9,7 @@ train:
   stage: long
   batch_size: 32
   micro_batch: 2
-  length_schedule: [[0.0, 2048], [0.34, 4096], [0.67, 8192]]
+  # Em 8k, micro-lote 1: com 2, o pico estimado (~85 GB, o dobro do medido em 4k: 46,8 GB) não cabe na
+  # classe menor de GPU (~89 GB). Mesmo gradiente (perda hn por linha), só muda a memória.
+  length_schedule: [[0.0, 2048], [0.34, 4096], [0.67, 8192, 1]]
   eval_every: 50

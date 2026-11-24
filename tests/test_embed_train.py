@@ -107,6 +107,27 @@ def _write_set(path, n, seed=0):
     return rows
 
 
+def test_hn_micro_batch_does_not_change_gradient(tiny_dir):
+    # Com a perda hn, cada query só concorre com o próprio positivo e os próprios negativos: o micro-lote
+    # muda a memória, não o gradiente (é o que permite micro-lote 1 na fase de 8k do S-long).
+    from lumi_embed.modeling.embedder import EmbedSpec
+    from lumi_embed.train.contrastive import _step, example_texts
+
+    rows_raw = _write_set(tiny_dir.parent / "hn_micro" / "x.jsonl", 6, seed=11)
+    spec = EmbedSpec.from_dict({"direction": "C", "pooling": "eos", "max_length": 32})
+    rows = [example_texts(r, spec, 2) for r in rows_raw]
+    m = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, use_hub_kernels=False)
+    grads = {}
+    for micro in (1, 2, 6):
+        m.zero_grad(set_to_none=True)
+        loss = _step(m, rows, LossConfig.from_dict({"mode": "hn", "temperature": 0.05}), micro, spec,
+                     torch.device("cpu"))
+        grads[micro] = (loss, [p.grad.clone() for p in m.parameters() if p.grad is not None])
+    for micro in (2, 6):
+        assert abs(grads[micro][0] - grads[1][0]) < 1e-5
+        assert all(torch.allclose(a, b, atol=1e-5, rtol=1e-4) for a, b in zip(grads[micro][1], grads[1][1]))
+
+
 @pytest.mark.parametrize("method,mode", [("lora", "hn"), ("lora", "inbatch"), ("full", "hn")])
 def test_train_loop_saves_loadable_embedder(tiny_dir, tmp_path, monkeypatch, method, mode):
     from lumi_embed.train.contrastive import train
@@ -305,9 +326,15 @@ def test_long_stage_then_merge_with_short_and_long_dev(tiny_dir, tmp_path, monke
         "loss": {"mode": "hn", "temperature": 0.05},
         "train": {"method": "lora", "lr": 1e-3, "batch_size": 8, "micro_batch": 2, "epochs": 1, "warmup_steps": 1,
                   "eval_every": 1, "lora": TINY_LORA, "gradient_checkpointing": False,
-                  "length_schedule": [[0.0, 16], [0.5, 64]]},
+                  "length_schedule": [[0.0, 16], [0.5, 64, 1]]},
     }
+    import lumi_embed.train.contrastive as ct
+
+    phases, real_step = [], ct._step
+    monkeypatch.setattr(ct, "_step", lambda m, rows, lc, micro, spec, dev: (
+        phases.append((spec.max_length, micro)), real_step(m, rows, lc, micro, spec, dev))[1])
     out = train(cfg, "C3-long", dev_eval_fn=dev_eval)
+    assert phases == [(16, 2), (64, 1)]   # 2 passos; o terceiro item da fase troca o micro-lote
     log = [json.loads(x) for x in (out.parent / "train_log.jsonl").read_text().splitlines()]
     assert all(devmod.LONG_TASK in r["dev"]["tasks"] and "retrieval" in r["dev"]["tasks"] for r in log)
     assert json.loads((out / "lumi_embed.json").read_text())["max_length"] == 8192

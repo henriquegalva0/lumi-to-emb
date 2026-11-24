@@ -251,6 +251,7 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
     save_every = float(tcfg.get("save_every_min", 30)) * 60
     eval_every = int(tcfg.get("eval_every", 0) or 0)
     autocast = torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda")
+    phase = (spec.max_length, micro)
 
     while step < total and not stop["flag"]:
         if cursor + batch > len(order):
@@ -259,13 +260,20 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
         idx = order[cursor : cursor + batch]
         cursor += batch
         t0 = time.time()
-        for frac, length in tcfg.get("length_schedule", []):  # currículo de comprimento (S-long)
-            if step >= float(frac) * total:
-                spec.max_length = int(length)
+        micro_now = micro
+        # currículo de comprimento (S-long): [fração, tokens] ou [fração, tokens, micro-lote]. O micro-lote só
+        # muda a memória: com a perda hn cada linha usa só os próprios negativos, e o gradiente é o mesmo.
+        for entry in tcfg.get("length_schedule", []):
+            if step >= float(entry[0]) * total:
+                spec.max_length = int(entry[1])
+                micro_now = int(entry[2]) if len(entry) > 2 else micro
+        if (spec.max_length, micro_now) != phase:
+            phase = (spec.max_length, micro_now)
+            log.info("Fase a partir do passo %d: até %d tokens, micro-lote %d", step + 1, *phase)
         rows = [example_texts(data[i], spec, k_neg, neg_field) for i in idx]
         optim.zero_grad(set_to_none=True)
         with autocast:
-            loss = _step(model, rows, loss_cfg, micro, spec, device)
+            loss = _step(model, rows, loss_cfg, micro_now, spec, device)
         grad_norm = torch.nn.utils.clip_grad_norm_(params, float(tcfg.get("max_grad_norm", 1.0)))
         optim.step()
         sched.step()
