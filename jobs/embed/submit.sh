@@ -54,6 +54,9 @@ case "${LUMI_PROFILE:-}" in
   *) echo "ERRO: LUMI_PROFILE deve ser 'small' ou 'gpu' (recebido: $LUMI_PROFILE)" >&2; exit 2 ;;
 esac
 vram=160; [ "$profile" = cpu ] && vram=20
+# Treino forçado na classe menor (cerca de metade da B200): o dobro do tempo. O treino grava o estado
+# a cada 30 min e retoma sozinho se for reenviado, então um corte perde no máximo esse intervalo.
+if [ "$profile" = cpu ] && [ "$STEP" = train ]; then hours=24; fi
 SUFFIX=""
 if [ $# -gt 0 ]; then SUFFIX="$(printf -- '-%s' "$@" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40)"; fi
 NAME="lumi-emb-${STEP}${SUFFIX}"

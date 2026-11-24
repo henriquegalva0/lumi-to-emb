@@ -117,8 +117,12 @@ Com 268 GB de cota, **um job de cada perfil cabe ao mesmo tempo**. Para rodar um
 LUMI_PROFILE=small bash jobs/embed/submit.sh eval R0 smoke mteb_br mteb_pt
 ```
 
-O treino, a síntese, a mineração e o merge continuam na B200. Dois jobs de GPU ao
-mesmo tempo, não: o segundo fica na fila até o primeiro terminar.
+Por padrão, o treino, a síntese, a mineração e o merge vão para a B200. Quando a
+fila da B200 está longa, a mineração com o teacher pelo transformers e o treino com
+LoRA também cabem na classe menor. Nesse caso, o treino ganha 24 h de limite, porque
+essa classe tem cerca de metade da B200. Ele grava o estado a cada 30 min e retoma
+sozinho se for reenviado. Dois jobs de GPU ao mesmo tempo, não: o segundo fica na
+fila até o primeiro terminar.
 
 **Uma regra:** não rode dois jobs que escrevam a mesma coisa ao mesmo tempo. Na prática:
 
