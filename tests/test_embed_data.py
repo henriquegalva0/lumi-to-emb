@@ -202,7 +202,12 @@ def test_mix_only_long_adds_replay_without_touching_other_sets(data_cfg, tmp_pat
     (tmp_path / "results/embed/contamination/audit.json").write_text(json.dumps(
         {"sets": {"S2/train": {"hits": [{"id": i, "field": "positive", "tasks": ["Quati"]} for i in s2_ids[:50]]}}}))
     cfg["mix"]["long"] = {"replay_s2": 0.3}
+    from lumi_embed.eval import dev as devmod
+    assert set(mixmod.DISTRACTOR_CACHES) == {devmod.DISTRACTORS_FILE, devmod.LONG_DISTRACTORS_FILE}
+    for fname in mixmod.DISTRACTOR_CACHES:  # caches de um dev anterior
+        (sets / fname).write_text('{"task": "x", "text": "y"}\n')
     man = mixmod.run_mix(cfg, only=["long"])
+    assert (sets / devmod.DISTRACTORS_FILE).exists() and not (sets / devmod.LONG_DISTRACTORS_FILE).exists()
     assert {n: (sets / n / "train.jsonl").read_text() for n in before} == before
     long_rows = [json.loads(x) for x in (sets / "long/train.jsonl").read_text().splitlines()]
     replay = [r for r in long_rows if not r["source"].get("long")]

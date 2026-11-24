@@ -27,6 +27,9 @@ from collections import defaultdict
 from ..utils import EmbedError, data_dir, iter_jsonl, results_dir, write_json
 
 log = logging.getLogger("lumi_embed.mix")
+# Caches dos distratores do dev (eval/dev.py) e os conjuntos de onde saem: regravar um desses conjuntos
+# apaga o cache, senão o dev novo seria avaliado com distratores do antigo (que podem conter positivos dele).
+DISTRACTOR_CACHES = {"dev_distractors.jsonl": ("S1", "S2"), "dev_distractors_long.jsonl": ("long",)}
 
 REAL = ("natural", "mmarco", "en_bitext", "labeled_pt")
 SYNTH = ("synth_retrieval", "synth_other")
@@ -209,5 +212,10 @@ def run_mix(cfg: dict, only: list[str] | None = None) -> dict:
         old["pool_sizes"] = manifest["pool_sizes"]
         manifest = old
     write_json(data_dir("sets", "manifest.json"), manifest)
+    for fname, deps in DISTRACTOR_CACHES.items():
+        f = data_dir("sets", fname)
+        if (not only or set(deps) & set(only)) and f.exists():
+            f.unlink()
+            log.info("Cache de distratores apagado (conjuntos regravados): %s", fname)
     log.info("Conjuntos: %s", {k: v.get("train") for k, v in manifest["sets"].items()})
     return manifest
