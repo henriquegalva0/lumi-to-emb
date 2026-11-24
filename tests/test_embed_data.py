@@ -649,3 +649,29 @@ def test_hf_teacher_left_padding_last_token_is_batch_invariant(tmp_path, tiny_to
     alone = torch.cat([t.embed([x]) for x in texts])
     assert torch.nn.functional.cosine_similarity(batched, alone).min() >= 0.9999
     assert torch.allclose(batched.norm(dim=-1), torch.ones(len(texts)), atol=1e-5)
+
+
+def test_long_family_cosine_threshold_is_separate(data_cfg):
+    # Na família longa, a pergunta sobre um trecho tem cosseno baixo com o documento inteiro: o limiar
+    # de cosseno dela é próprio (synthetic_min_cos_long); o filtro de posição continua valendo.
+    torch = pytest.importorskip("torch")
+    from lumi_embed.data.mine import mine_group
+
+    class T:
+        def __init__(self, max_len):
+            self.max_len, self.cfg = max_len, data_cfg["mining"]
+
+        def query_text(self, ex):
+            return ex["query"]
+
+        def embed(self, texts):  # query e documento com cosseno 0,5; outro documento ortogonal
+            table = {"q": [1.0, 0.0], "doc": [0.5, 0.8660254], "outro": [0.0, 1.0]}
+            return torch.tensor([table[t] for t in texts])
+
+    rows = [make_example("retrieval", "pt-BR", "inst", "q", "doc", {"gen": "g", "long": True})]
+    rows[0]["query"], rows[0]["positive"] = "q", "doc"
+    mcfg = {**data_cfg["mining"], "synthetic_min_cos": 0.7, "synthetic_min_cos_long": 0.0, "positive_rank_check": 10}
+    kept, st = mine_group(T(int(mcfg["max_len_long"])), rows, ["outro"], mcfg)
+    assert len(kept) == 1 and st["drop_low_cos"] == 0
+    kept, st = mine_group(T(int(mcfg["max_len"])), rows, ["outro"], mcfg)   # família curta: 0,7 vale
+    assert len(kept) == 0 and st["drop_low_cos"] == 1

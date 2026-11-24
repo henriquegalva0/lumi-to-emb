@@ -225,6 +225,8 @@ def mine_group(teacher: Teacher, rows: list[dict], extra_docs: list[str], mcfg: 
     D = _embed_all(teacher, d_inputs, bs, "documentos")
     k_store, top = int(mcfg["store_negatives"]), int(mcfg["search_top"])
     perc, thr, rank_k = float(mcfg["percpos"]), float(mcfg["synthetic_min_cos"]), int(mcfg["positive_rank_check"])
+    if long_docs:  # o cosseno de uma pergunta sobre um trecho com o documento inteiro é naturalmente menor
+        thr = float(mcfg.get("synthetic_min_cos_long", thr))
     kept, stats = [], {"in": len(rows), "drop_low_cos": 0, "drop_rank": 0, "few_negatives": 0}
     dup = NearDup()  # assinaturas em cache por família (cada documento é processado uma vez)
     pidx = torch.tensor(pos_idx, device=Q.device)

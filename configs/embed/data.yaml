@@ -175,6 +175,9 @@ mining:                             # seção 2.4
   store_negatives: 8
   percpos: 0.95                     # TopK-PercPos
   synthetic_min_cos: 0.7            # filtro do Qwen3-Embedding
+  synthetic_min_cos_long: 0.0       # família longa: só o filtro de posição (top-10). Com 0,7 saíam 51 %
+                                    # dos pares (perguntas sobre detalhes de documentos de 2k–8k tokens),
+                                    # e só 4 tinham o positivo fora do top-10 entre 20 mil documentos
   positive_rank_check: 10           # positivo precisa estar no top-10 do teacher (proposta)
   min_negatives: 1
   inputs: [clean/wiki_pt.jsonl, clean/mmarco_pt.jsonl, clean/bitext.jsonl, clean/english.jsonl,
