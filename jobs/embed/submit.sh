@@ -8,7 +8,7 @@
 #   bash jobs/embed/submit.sh eval C2 mteb_br mteb_pt
 #   LUMI_PROFILE=small bash jobs/embed/submit.sh eval R0 mteb_br   (classe menor de GPU)
 # Gera jobs/embed/.generated/<nome>.{yaml,sh} com o perfil de recursos da etapa e chama
-# `sauron submit`. Perfis: "gpu" = B200 (vram 160, ~179 GB da cota); "cpu" = a menor classe
+# `sauron submit -f`. Perfis: "gpu" = B200 (vram 160, ~179 GB da cota); "cpu" = a menor classe
 # de GPU (vram 20), para etapas sem GPU — as duas cabem juntas numa cota de 268 GB.
 set -euo pipefail
 trap 'echo "ERRO: submit.sh falhou na linha $LINENO (comando: $BASH_COMMAND)" >&2' ERR
@@ -73,6 +73,7 @@ cpus: $cpus
 memory: $mem
 max_time: ${hours}h
 workspace: $WORKSPACE
+script: $NAME.sh
 YAML
 ARGS=""; for a in "$@"; do ARGS+=" $(printf '%q' "$a")"; done
 cat > "$GEN/$NAME.sh" <<SH
@@ -83,5 +84,7 @@ bash run_embed.sh $(printf '%q' "$STEP")$ARGS
 SH
 plabel="B200, vram 160"; [ "$profile" = cpu ] && plabel="classe menor de GPU, vram 20"
 echo "Job: $NAME ($plabel, até ${hours}h)  →  $GEN/$NAME.yaml"
-cd "$CLONE"
-sauron submit -c "$GEN/$NAME.yaml" "$GEN/$NAME.sh"
+# O Sauron não aceita mais `submit -c job.yaml script.sh` (desde 25/11/2026): o script vai na chave
+# `script:` do YAML e o envio é `submit -f`. YAML e script ficam lado a lado, e o envio parte dessa pasta.
+cd "$GEN"
+sauron submit -f "$NAME.yaml"
