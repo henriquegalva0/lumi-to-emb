@@ -9,7 +9,7 @@ train:
   stage: long
   batch_size: 32
   micro_batch: 2
-  # Em 8k, micro-lote 1: com 2, o pico estimado (~85 GB, o dobro do medido em 4k: 46,8 GB) não cabe na
-  # classe menor de GPU (~89 GB). Mesmo gradiente (perda hn por linha), só muda a memória.
-  length_schedule: [[0.0, 2048], [0.34, 4096], [0.67, 8192, 1]]
+  # Como o C3-long rodou: micro-lote 2 em todas as fases (pico de 77,4 GB em 8k, na classe menor de GPU de
+  # ~89 GB). Se faltar memória, [0.67, 8192, 1] usa micro-lote 1 só em 8k, com o mesmo gradiente (perda hn por linha).
+  length_schedule: [[0.0, 2048], [0.34, 4096], [0.67, 8192]]
   eval_every: 50
