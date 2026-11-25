@@ -1,6 +1,7 @@
 """Perdas, GradCache, laço de treino (LoRA e completo), retomada, MNTP e merges — no NemotronH minúsculo."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -346,3 +347,65 @@ def test_long_stage_then_merge_with_short_and_long_dev(tiny_dir, tmp_path, monke
     assert all(devmod.LONG_TASK in r["tasks"] for r in rep["dev"].values())
     spec = json.loads((ckpt_dir("M-L") / "model" / "lumi_embed.json").read_text())
     assert spec["max_length"] == 8192   # o spec do resultado vem do primeiro candidato (o longo)
+    sel = ckpt_dir(rep["selected"]) / "model"   # o escolhido entra por hard links; o meta.json é copiado
+    assert all((ckpt_dir("M-L") / "model" / f.name).stat().st_ino == f.stat().st_ino for f in sel.glob("*.safetensors"))
+    assert (ckpt_dir("M-L") / "model" / "meta.json").stat().st_ino != (sel / "meta.json").stat().st_ino
+    assert json.loads((ckpt_dir("M-L") / "model" / "meta.json").read_text())["selected"] == rep["selected"]
+    assert "selected" not in json.loads((sel / "meta.json").read_text())
+
+
+def test_merge_fails_early_without_disk_space(tiny_dir, tmp_path, monkeypatch):
+    # Disco cheio: o merge M-L caiu no fim, depois de 1h29m. Agora falha antes de gravar qualquer versão.
+    import collections
+
+    import lumi_embed.utils as ut
+    from lumi_embed.merge.run import run_merge_grid
+    from lumi_embed.utils import EmbedError, ckpt_dir
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    base = LumiEmbedder.from_pretrained(str(tiny_dir), dtype=torch.float32, use_hub_kernels=False)
+    for c in ("A", "B"):
+        save_embedder(base, ckpt_dir(c) / "model", meta={"seed": 0}, dtype=torch.float32)
+    Usage = collections.namedtuple("Usage", "total used free")
+    monkeypatch.setattr(ut.shutil, "disk_usage", lambda p: Usage(10**12, 10**12 - 1000, 1000))
+    with pytest.raises(EmbedError, match="Sem espaço em disco"):
+        run_merge_grid({"name": "M-X", "candidates": ["A", "B"], "slerp_pairs": [["A", "B"]], "slerp_t": [0.5],
+                        "dev": ["sets/S2/dev.jsonl"]})
+    assert not ckpt_dir("M-X-avg").exists() and not ckpt_dir("M-X").exists()
+
+
+def test_prune_merge_removes_only_discarded_variants(tmp_path):
+    # jobs/embed/prune_merge.py: apaga as versões da grade (a escolhida só se o merge tem os mesmos pesos),
+    # nunca candidatos, o merge ou releases; sem --apply, só mostra.
+    import shutil
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[1]
+    (tmp_path / "jobs/embed").mkdir(parents=True)
+    shutil.copy(repo / "jobs/embed/prune_merge.py", tmp_path / "jobs/embed/prune_merge.py")
+    ck = tmp_path / "checkpoints"
+
+    def model(name, data=b"x" * 100):
+        (ck / name / "model").mkdir(parents=True)
+        (ck / name / "model" / "model.safetensors").write_bytes(data)
+        (ck / name / "model" / "config.json").write_text("{}")
+
+    for n in ("A", "B", "M-X-avg", "M-X-slerp-A-B-t0.5", "M-X", "lumi-emb-x"):
+        model(n)
+    model("M-Y-avg"), model("M-Y-slerp-A-B-t0.5"), model("M-Y", b"y" * 50)  # M-Y: merge com pesos diferentes
+    for m in ("M-X", "M-Y"):
+        dev = {v: {"mean_ndcg@10": 0.9} for v in ("A", "B", f"{m}-avg", f"{m}-slerp-A-B-t0.5")}
+        (ck / m / "merge_report.json").write_text(json.dumps({"selected": f"{m}-slerp-A-B-t0.5", "dev": dev}))
+
+    def run(*args):
+        return subprocess.run([sys.executable, str(tmp_path / "jobs/embed/prune_merge.py"), *args],
+                              capture_output=True, text=True, check=True).stdout
+
+    out = run("M-X", "M-Y")
+    assert "seria apagada" in out and (ck / "M-X-avg").exists() and not (ck / "M-X" / "pruned.json").exists()
+    run("M-X", "M-Y", "--apply")
+    assert not (ck / "M-X-avg").exists() and not (ck / "M-X-slerp-A-B-t0.5").exists()
+    assert not (ck / "M-Y-avg").exists() and (ck / "M-Y-slerp-A-B-t0.5").exists()   # pesos diferentes: mantida
+    assert all((ck / n / "model" / "model.safetensors").exists() for n in ("A", "B", "M-X", "M-Y", "lumi-emb-x"))
+    assert json.loads((ck / "M-X" / "pruned.json").read_text())[0]["removed"] == ["M-X-avg", "M-X-slerp-A-B-t0.5"]

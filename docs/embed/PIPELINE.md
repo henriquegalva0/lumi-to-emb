@@ -55,6 +55,8 @@ setup → check → eval R0/R0e (referência zero-shot)
 
 O **modelo publicado** (`lumi-emb`) é o melhor no dev entre os merges e os checkpoints finais: o merge, se empata ou supera o melhor checkpoint individual no dev; senão, esse checkpoint. Os benchmarks não entram na escolha. `python3 jobs/embed/choose_release.py` (para o modelo longo: `python3 jobs/embed/choose_release.py M-L lumi-emb-long`) aplica a regra a partir do `merge_report.json`, cria `checkpoints/lumi-emb/` e grava a proveniência em `choice.json`. Depois, rode `verify lumi-emb`, `eval lumi-emb …` e `publish lumi-emb --release`.
 
+**Disco.** Cada versão de um merge ocupa ~8 GB. O merge e o treino conferem o espaço livre logo no início e param com uma mensagem clara se faltar. O modelo escolhido entra em `checkpoints/<merge>/model` por hard links, sem ocupar espaço a mais. Depois da escolha, `python3 jobs/embed/prune_merge.py <merge>` mostra as versões descartadas e quanto espaço cada uma libera; com `--apply`, apaga essas versões e registra o que apagou em `pruned.json`. As notas no dev continuam no `merge_report.json`, e qualquer versão pode ser refeita a partir dos candidatos.
+
 ## Com o Sauron
 
 Na sessão de login, dentro do clone (por exemplo `~/workspace/lumi-inference/lumi-to-emb`):

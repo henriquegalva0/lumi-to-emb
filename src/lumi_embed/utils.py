@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import random
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,21 @@ EMBED_CONFIG_DIR = REPO_ROOT / "configs" / "embed"
 
 class EmbedError(Stage1Error):
     """Erro com mensagem pensada para o log (sem precisar do traceback)."""
+
+
+def ensure_free_space(path: str | Path, need_bytes: float, what: str) -> int:
+    """Falha logo no início, com mensagem clara, se o disco de `path` não tem `need_bytes` livres.
+
+    O merge e o treino gravam ~8 GB por modelo. Com o disco cheio, o merge M-L caiu no fim (1h29m) e
+    sem traceback no log, porque nem o log conseguia mais ser gravado."""
+    p = Path(path)
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    free = shutil.disk_usage(p).free
+    if free < need_bytes:
+        raise EmbedError(f"Sem espaço em disco para {what}: {free / 1e9:.1f} GB livres em {p}, precisa de "
+                         f"~{need_bytes / 1e9:.0f} GB. Libere espaço (ex.: python3 jobs/embed/prune_merge.py) e reenvie.")
+    return free
 
 
 def load_config(path: str | Path) -> dict:

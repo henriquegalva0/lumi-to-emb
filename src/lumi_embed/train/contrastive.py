@@ -26,7 +26,8 @@ import torch
 
 from ..modeling.embedder import EmbedSpec, LumiEmbedder, format_query
 from ..modeling.export import save_embedder
-from ..utils import EmbedError, ckpt_dir, data_dir, iter_jsonl, run_metadata, seed_everything, write_json
+from ..utils import (EmbedError, ckpt_dir, data_dir, ensure_free_space, iter_jsonl, run_metadata,
+                     seed_everything, write_json)
 from .gradcache import gradcache_step
 from .losses import LossConfig, contrastive_loss
 
@@ -196,6 +197,7 @@ def train(cfg: dict, ckpt_id: str, *, max_minutes: float | None = None, dev_eval
     if (out / "model" / "meta.json").exists():
         log.info("%s já está treinado em %s (apague a pasta para refazer).", ckpt_id, out / "model")
         return out / "model"
+    ensure_free_space(out, float(tcfg.get("min_free_gb", 20)) * 1e9, f"o treino {ckpt_id} (estado e modelo exportado)")
 
     data = load_examples(resolve_data(cfg["data"]["train"]), cfg["data"].get("limit"))
     dev = None
