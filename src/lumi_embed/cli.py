@@ -150,8 +150,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except KeyboardInterrupt:
         return 130
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.error("Erro inesperado:\n%s", traceback.format_exc())
+        if "NVML_SUCCESS" in str(exc) or "out of memory" in str(exc).lower():
+            log.error("Provável falta de memória na GPU. Na classe menor (MIG), o PyTorch mostra o assert do NVML no "
+                      "lugar da mensagem de falta de memória. Reduza o micro-lote (train.micro_batch) ou use a B200.")
         return 1
     if args.cmd == "data" and args.step in VLLM_STEPS:
         _exit_now(0)

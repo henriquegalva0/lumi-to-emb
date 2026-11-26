@@ -10,5 +10,6 @@ train:
   lora: {r: 16, alpha: 32}
   lr: 5.0e-5
   batch_size: 32
+  micro_batch: 8                   # mesmo gradiente do lote 32; folga na classe menor de GPU (~89 GB)
   max_steps: 1000
   warmup_steps: 50

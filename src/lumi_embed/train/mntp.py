@@ -83,12 +83,16 @@ def train_mntp(cfg: dict, ckpt_id: str, max_minutes: float | None = None):
     if not texts:
         raise EmbedError("Sem texto para o MNTP.")
     batch, total = int(tcfg["batch_size"]), int(tcfg["max_steps"])
+    micro = int(tcfg.get("micro_batch", batch))
     params = [p for p in lm.parameters() if p.requires_grad]
     optim = torch.optim.AdamW(params, lr=float(tcfg["lr"]), weight_decay=0.0, fused=device.type == "cuda")
     sched = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda(int(tcfg.get("warmup_steps", 0)), total))
     ratio = float(mcfg.get("mask_ratio", 0.3))
-    log.info("MNTP %s: direção %s, %d textos, %d passos, máscara %.0f%%", ckpt_id, spec.direction, len(texts), total,
-             100 * ratio)
+    log.info("MNTP %s: direção %s, %d textos, %d passos (lote %d, micro-lote %d), máscara %.0f%%", ckpt_id,
+             spec.direction, len(texts), total, batch, micro, 100 * ratio)
+    # Modo de treino: no transformers, o gradient checkpointing só age com o módulo em treino. Sem isso, o
+    # lote inteiro guarda todas as ativações (o B0 estourou os ~89 GB da classe menor no primeiro passo).
+    lm.train()
     t0 = time.time()
     order = list(range(len(texts)))
     rng.shuffle(order)
@@ -102,16 +106,24 @@ def train_mntp(cfg: dict, ckpt_id: str, max_minutes: float | None = None):
         chunk = [texts[i] for i in order[cur : cur + batch]]
         cur += batch
         enc = tok(chunk, padding=True, truncation=True, max_length=spec.max_length, return_tensors="pt")
+        # A máscara é sorteada no lote inteiro (mesmos sorteios com qualquer micro-lote); cada micro-lote
+        # soma a sua parte da perda, dividida pelo total de tokens mascarados: o gradiente é o do lote inteiro.
         ids, rows, cols, labels = mask_batch(enc["input_ids"], enc["attention_mask"], ratio, mask_id, rng)
-        ids, mask = ids.to(device), enc["attention_mask"].to(device)
-        with autocast:
-            embeds = base.model.get_input_embeddings()(ids)
-            masks = build_masks(base.model, embeds, mask)
-            h = base.model(inputs_embeds=embeds, attention_mask=masks, use_cache=False).last_hidden_state
-            logits = base.lm_head(h[rows.to(device), (cols - 1).to(device)])  # posição i prevista por i-1
-            loss = F.cross_entropy(logits.float(), labels.to(device))
         optim.zero_grad(set_to_none=True)
-        loss.backward()
+        loss = torch.zeros((), device=device)
+        for s in range(0, len(chunk), micro):
+            sel = (rows >= s) & (rows < s + micro)
+            if not bool(sel.any()):
+                continue
+            mids, mmask = ids[s : s + micro].to(device), enc["attention_mask"][s : s + micro].to(device)
+            with autocast:
+                embeds = base.model.get_input_embeddings()(mids)
+                masks = build_masks(base.model, embeds, mmask)
+                h = base.model(inputs_embeds=embeds, attention_mask=masks, use_cache=False).last_hidden_state
+                logits = base.lm_head(h[(rows[sel] - s).to(device), (cols[sel] - 1).to(device)])  # i prevista por i-1
+                part = F.cross_entropy(logits.float(), labels[sel].to(device), reduction="sum") / len(labels)
+            part.backward()
+            loss += part.detach()
         torch.nn.utils.clip_grad_norm_(params, 1.0)
         optim.step()
         sched.step()
@@ -120,6 +132,7 @@ def train_mntp(cfg: dict, ckpt_id: str, max_minutes: float | None = None):
             log.info("MNTP passo %d/%d | perda %.4f", step, total, float(loss.detach()))
         if max_minutes is not None and (time.time() - t0) / 60 > max_minutes:
             raise EmbedError("Tempo esgotado no MNTP (estágio curto, sem retomada): aumente max_time ou reduza max_steps.")
+    lm.eval()
     merged = lm.merge_and_unload()
     model = LumiEmbedder(merged.model, tok, spec)
     meta = run_metadata(cfg, ckpt_id=ckpt_id, seed=seed, steps=total, hub_kernels=kernel_info,

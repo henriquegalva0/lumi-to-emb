@@ -197,6 +197,37 @@ def test_mntp_exports_bidirectional_embedder(tiny_tok_dir, tmp_path, monkeypatch
     assert m.encode(["a cidade"]).shape == (1, 64)
 
 
+def test_mntp_runs_in_train_mode_and_micro_batch_keeps_the_gradient(tiny_tok_dir, tmp_path, monkeypatch):
+    # O B0 estourou a GPU da classe menor no 1º passo: o MNTP rodava com o modelo em modo de avaliação, e o
+    # gradient checkpointing do transformers só age em modo de treino. O micro-lote não pode mudar o gradiente.
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from lumi_embed.train import mntp
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    tok = AutoTokenizer.from_pretrained(str(tiny_tok_dir))
+    lm = AutoModelForCausalLM.from_config(tiny_config(len(tok)), dtype=torch.float32)
+    lm.save_pretrained(tmp_path / "lm")
+    tok.save_pretrained(tmp_path / "lm")
+    (tmp_path / "data/embed/sets/s0").mkdir(parents=True)
+    words = "a cidade de rio grande foi capital do estado durante a guerra dos farrapos no sul".split()
+    (tmp_path / "data/embed/sets/s0/train.jsonl").write_text(
+        "\n".join(json.dumps({"text": " ".join(words[: 6 + i])}) for i in range(8)))
+    seen, orig = [], mntp.build_masks
+    monkeypatch.setattr(mntp, "build_masks", lambda m, e, a: (seen.append(m.training), orig(m, e, a))[1])
+    vecs = {}
+    for micro in (4, 1):
+        cfg = {"seed": 0, "init": str(tmp_path / "lm"), "model": {"use_hub_kernels": False},
+               "embedding": {"direction": "Ba", "pooling": "mean", "max_length": 32},
+               "data": {"train": "sets/s0/train.jsonl"}, "mntp": {"mask_ratio": 0.3, "mask_token": "<unk>"},
+               "train": {"lr": 1e-2, "batch_size": 4, "micro_batch": micro, "max_steps": 3, "lora": TINY_LORA}}
+        m = LumiEmbedder.from_pretrained(str(mntp.train_mntp(cfg, f"B0a-m{micro}")), dtype=torch.float32,
+                                         use_hub_kernels=False)
+        vecs[micro] = m.encode(["a cidade de rio grande", "capital do estado"])
+    assert seen and all(seen)                                   # sempre em modo de treino
+    assert torch.allclose(vecs[4], vecs[1], atol=1e-5)          # micro-lote 1 = lote inteiro
+
+
 def test_merges(tiny_tok_dir, tmp_path):
     dirs = []
     for s in range(3):
