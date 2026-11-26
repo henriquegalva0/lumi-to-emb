@@ -17,7 +17,32 @@ O **lumi-emb-long** transforma o [Lumi-4B](https://huggingface.co/ceia-research/
 
 Até onde sabemos, é um dos primeiros embedders construídos sobre um híbrido Mamba-Transformer e avaliados a fundo em português. Este repositório traz o caminho inteiro, do LLM ao modelo publicado: a medição da janela de contexto, os dados, o treino, os merges, a avaliação e os testes.
 
+*English readers: see the [English summary](#english-summary).*
+
+## O que é um modelo de embeddings, em poucas palavras
+
+Um modelo de *embeddings* transforma um texto numa lista de números, um vetor, que representa o seu significado. Textos com sentidos parecidos viram vetores próximos, mesmo quando usam palavras diferentes. Por exemplo, "como declarar gastos com médico?" fica perto de "despesas médicas podem ser deduzidas do imposto de renda". Com isso, dá para buscar por significado, e não só por palavras iguais.
+
+No **RAG** (geração aumentada por recuperação), esse é o primeiro passo:
+1. Os documentos de uma base (manuais, leis, contratos, perguntas frequentes) são convertidos em vetores uma única vez.
+2. A cada pergunta, o modelo de embeddings encontra os trechos mais próximos dela.
+3. Só esses trechos vão para o LLM que escreve a resposta.
+
+Se a busca erra, o LLM responde com base no texto errado, e por isso a qualidade do modelo de embeddings pesa tanto. Além disso, quanto mais texto ele lê de uma vez, menos é preciso picotar os documentos. O lumi-emb-long lê até 8k tokens de uma vez, cerca de uma dezena de páginas.
+
+```mermaid
+flowchart LR
+    P["Pergunta"] --> E["Modelo de embeddings<br/>(lumi-emb-long)"]
+    B[("Base de documentos<br/>já convertida em vetores")] --> S
+    E --> S["Busca pelos<br/>vetores mais próximos"]
+    S --> T["Trechos relevantes"] --> G["LLM"] --> R["Resposta"]
+    classDef main fill:#2a78d6,stroke:#2a78d6,color:#ffffff
+    class E main
+```
+
 ## Destaques
+
+Os termos técnicos estão explicados no [glossário](#glossário).
 
 <!-- HIGHLIGHTS:START -->
 |  | lumi-emb-long | Comparação |
@@ -134,6 +159,24 @@ flowchart LR
 - **Uso não comercial,** por causa dos dados de treino (mMARCO).
 
 A lista completa está no [model card](docs/huggingface/README.md#limitações).
+
+## English summary
+
+**Lumi-Embed** turns [Lumi-4B](https://huggingface.co/ceia-research/lumi-4b), a 4B-parameter hybrid Mamba-2 + attention LLM for Brazilian Portuguese, into a text-embedding model for semantic search and RAG. The released model, **lumi-emb-long**, reads whole documents of up to 8k tokens.
+
+- **Long documents:** on MLDR-pt with documents of up to 8k tokens, nDCG@10 goes from 47.88 to 73.94 after a short long-context stage, with no loss on short texts.
+- **MTEB-BR (22 native PT-BR tasks):** 62.48. That is twice the untrained backbone (30.65), and statistically tied with multilingual-e5-large-instruct and Qwen3-Embedding-0.6B.
+- **Strengths:** the highest classification average among the compared models (above Qwen3-Embedding-8B). Retrieval is above Qwen3-Embedding-4B, a Transformer of the same size, and the model beats it on 10 of the 22 MTEB-BR tasks.
+- **Limitations:** the gains stop beyond 8k tokens. It is still about 3 points below Qwen3-Embedding-4B on average, mostly in clustering and STS. Non-commercial use.
+
+**Recipe:**
+- last-token (EOS) pooling;
+- staged contrastive LoRA training: weakly supervised, then supervised with positive-aware hard negatives, then a 2k → 4k → 8k long-context curriculum with short-text replay;
+- native PT-BR synthetic data from three open generators, plus natural pairs;
+- checkpoint merges selected on a held-out dev set, never on test data;
+- a clean zero-shot contamination policy, with a post-hoc audit.
+
+As far as we know, it is one of the first hybrid Mamba-Transformer text embedders evaluated in depth in Portuguese. Model card (in Portuguese, with an English summary): [henriquegalvao/lumi-4b-embedding](https://huggingface.co/henriquegalvao/lumi-4b-embedding).
 
 ## Andamento
 
@@ -273,6 +316,33 @@ Depois de publicado, o `hubcheck` carrega o modelo do Hub exatamente como o card
   - os laços de treino com LoRA e completo, a retomada, o currículo de comprimento, o MNTP e os merges;
   - o pipeline de dados e a descontaminação;
   - o relatório e as figuras, gerados só a partir de resultados.
+
+## Glossário
+
+| Termo | O que significa |
+|---|---|
+| **Embedding** | Vetor de números que representa o significado de um texto. Textos parecidos viram vetores próximos. |
+| **RAG** | Geração aumentada por recuperação: busca trechos relevantes numa base de documentos e os entrega a um LLM junto com a pergunta. |
+| **Query e documento** | A pergunta de busca e o texto que pode respondê-la. Aqui, a query leva uma instrução curta, e o documento não. |
+| **Similaridade de cosseno** | Medida de proximidade entre dois embeddings: quanto maior, mais parecidos os significados. |
+| **Token** | Pedaço de palavra, a unidade que o modelo lê. 8k tokens equivalem a cerca de uma dezena de páginas. |
+| **Janela de contexto e L\*** | Quanto texto o modelo consegue ler de uma vez. O L\* é o maior comprimento em que o Lumi-4B ainda acha uma informação escondida com pelo menos 90 % de acerto (Etapa 1). |
+| **Transformer** | A arquitetura da maioria dos LLMs e modelos de embeddings, como o Qwen3-Embedding, baseada em camadas de atenção. |
+| **Mamba-2 e modelo híbrido** | O Mamba-2 é um tipo de camada que lê o texto em sequência, guardando uma memória de tamanho fixo. O Lumi-4B é híbrido: mistura camadas Mamba-2 com algumas camadas de atenção. |
+| **Pooling pelo último token (EOS)** | O embedding é o estado interno do modelo no token final (`</s>`), que resume o texto lido até ali. |
+| **Treino contrastivo (InfoNCE)** | Ensina o modelo a aproximar a query do documento certo e a afastá-la dos errados. |
+| **Negativos difíceis (TopK-PercPos)** | Documentos parecidos com o certo, mas que não respondem à pergunta; tornam o treino mais exigente. O critério TopK-PercPos descarta os candidatos parecidos demais com o certo, que provavelmente também respondem. |
+| **LoRA** | Forma econômica de ajustar um modelo grande: em vez de mudar todos os pesos, treina pequenas matrizes extras. |
+| **Checkpoint** | Uma versão salva do modelo durante o projeto (ex.: C2, C3-long). |
+| **Merge e SLERP** | Combinar os pesos de modelos já treinados num só. O SLERP é uma interpolação entre dois modelos que segue a curvatura dos vetores de pesos. |
+| **Dev** | Conjunto de exemplos separado, usado só para escolher entre checkpoints. Os benchmarks nunca entram nessa escolha. |
+| **MTEB-BR, MTEB-PT** | Conjuntos de avaliação em português: o MTEB-BR tem 22 tarefas nativas do Brasil (classificação, busca, agrupamento e outras); o MTEB-PT reúne tarefas em português por família. |
+| **LongEmbed e MLDR-pt** | Avaliações com documentos longos: o LongEmbed é em inglês, com documentos de até 32k tokens; o MLDR-pt é busca em documentos longos em português. |
+| **Passkey e Needle** | Testes do LongEmbed em que uma informação curta é escondida num texto longo, e o modelo precisa achar o documento que a contém. |
+| **nDCG@10** | Nota de 0 a 100 que mede se os documentos certos aparecem entre os 10 primeiros resultados da busca, valendo mais quanto mais perto do topo. |
+| **Classificação, clusterização, STS, reranking** | Tipos de tarefa: atribuir rótulos a textos; agrupar textos por tema; dar nota à semelhança entre duas frases; reordenar uma lista de candidatos. |
+| **IC 95 %, p-valor e empate estatístico** | O IC é a margem de incerteza de uma média. O p-valor é a chance de uma diferença daquele tamanho aparecer só por acaso. Com p ≥ 0,05, nenhuma diferença é declarada: os modelos estão em empate estatístico. |
+| **Contaminação** | Quando textos dos testes aparecem no treino e inflam as notas. Aqui, eles são filtrados antes do treino, e uma auditoria confere o resultado. |
 
 ## Licenças
 

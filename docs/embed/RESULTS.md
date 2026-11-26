@@ -230,7 +230,7 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | M-C | 0.9779 | — | — | = M-C-base0.75 |
 | M-L | 0.9756 | — | — | = M-L-slerp-C3-long-lumi-emb-t0.25 |
 | lumi-emb | 0.9779 | — | — | = M-C (M-C-base0.75) |
-| lumi-emb-long | 0.9756 | — | — | = M-L-slerp-C3-long-lumi-emb-t0.25 |
+| lumi-emb-long | 0.9756 | — | — | = M-L (M-L-slerp-C3-long-lumi-emb-t0.25) |
 
 ## Grade do merge M-C (dev)
 

@@ -57,7 +57,20 @@ Evaluation follows a clean zero-shot contamination policy. A post-hoc audit foun
 
 As far as we know, it is one of the first hybrid Mamba-Transformer text embedders evaluated in depth in Portuguese. Code, configs and data recipes: [github.com/henriquegalva0/lumi-to-emb](https://github.com/henriquegalva0/lumi-to-emb).
 
+## O que é um modelo de embeddings, em poucas palavras
+
+Um modelo de *embeddings* transforma um texto numa lista de números, um vetor, que representa o seu significado. Textos com sentidos parecidos viram vetores próximos, mesmo quando usam palavras diferentes. Por exemplo, "como declarar gastos com médico?" fica perto de "despesas médicas podem ser deduzidas do imposto de renda". Com isso, dá para buscar por significado, e não só por palavras iguais.
+
+No **RAG** (geração aumentada por recuperação), esse é o primeiro passo:
+1. Os documentos de uma base (manuais, leis, contratos, perguntas frequentes) são convertidos em vetores uma única vez.
+2. A cada pergunta, o modelo de embeddings encontra os trechos mais próximos dela.
+3. Só esses trechos vão para o LLM que escreve a resposta.
+
+Se a busca erra, o LLM responde com base no texto errado, e por isso a qualidade do modelo de embeddings pesa tanto. Além disso, quanto mais texto ele lê de uma vez, menos é preciso picotar os documentos. O lumi-emb-long lê até 8k tokens de uma vez, cerca de uma dezena de páginas.
+
 ## Destaques
+
+Os termos técnicos estão explicados no [glossário](#glossário).
 
 <!-- HIGHLIGHTS:START -->
 |  | lumi-emb-long | Comparação |
@@ -341,7 +354,7 @@ MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). 
 | M-C | 62.41 [54.27, 70.14] | 0.9779 | = M-C-base0.75 |
 | M-L | 62.48 [54.40, 70.10] | 0.9756 | = M-L-slerp-C3-long-lumi-emb-t0.25 |
 | lumi-emb | 62.41 [54.27, 70.14] | 0.9779 | = M-C (M-C-base0.75) |
-| lumi-emb-long | 62.48 [54.40, 70.10] | 0.9756 | = M-L-slerp-C3-long-lumi-emb-t0.25 |
+| lumi-emb-long | 62.48 [54.40, 70.10] | 0.9756 | = M-L (M-L-slerp-C3-long-lumi-emb-t0.25) |
 
 #### Grade do merge M-C (dev)
 
@@ -439,6 +452,33 @@ A situação de cada hipótese está na tabela "Hipóteses pré-registradas", ac
 - **Contaminação residual:** ver a auditoria posterior, na seção Dados.
 - **Ablação A2 em escalas diferentes:** S2-real (91 mil exemplos, dos quais só 22,5 mil em PT nativo; o resto é mMARCO traduzido e bitexto) e S2-syn (74 mil) não têm o tamanho do S2 (120 mil).
 - **Uso não comercial:** entre os dados de treino está o mMARCO/MS MARCO, de uso não comercial.
+
+## Glossário
+
+| Termo | O que significa |
+|---|---|
+| **Embedding** | Vetor de números que representa o significado de um texto. Textos parecidos viram vetores próximos. |
+| **RAG** | Geração aumentada por recuperação: busca trechos relevantes numa base de documentos e os entrega a um LLM junto com a pergunta. |
+| **Query e documento** | A pergunta de busca e o texto que pode respondê-la. Aqui, a query leva uma instrução curta, e o documento não. |
+| **Similaridade de cosseno** | Medida de proximidade entre dois embeddings: quanto maior, mais parecidos os significados. |
+| **Token** | Pedaço de palavra, a unidade que o modelo lê. 8k tokens equivalem a cerca de uma dezena de páginas. |
+| **Janela de contexto e L\*** | Quanto texto o modelo consegue ler de uma vez. O L\* é o maior comprimento em que o Lumi-4B ainda acha uma informação escondida com pelo menos 90 % de acerto (Etapa 1). |
+| **Transformer** | A arquitetura da maioria dos LLMs e modelos de embeddings, como o Qwen3-Embedding, baseada em camadas de atenção. |
+| **Mamba-2 e modelo híbrido** | O Mamba-2 é um tipo de camada que lê o texto em sequência, guardando uma memória de tamanho fixo. O Lumi-4B é híbrido: mistura camadas Mamba-2 com algumas camadas de atenção. |
+| **Pooling pelo último token (EOS)** | O embedding é o estado interno do modelo no token final (`</s>`), que resume o texto lido até ali. |
+| **Treino contrastivo (InfoNCE)** | Ensina o modelo a aproximar a query do documento certo e a afastá-la dos errados. |
+| **Negativos difíceis (TopK-PercPos)** | Documentos parecidos com o certo, mas que não respondem à pergunta; tornam o treino mais exigente. O critério TopK-PercPos descarta os candidatos parecidos demais com o certo, que provavelmente também respondem. |
+| **LoRA** | Forma econômica de ajustar um modelo grande: em vez de mudar todos os pesos, treina pequenas matrizes extras. |
+| **Checkpoint** | Uma versão salva do modelo durante o projeto (ex.: C2, C3-long). |
+| **Merge e SLERP** | Combinar os pesos de modelos já treinados num só. O SLERP é uma interpolação entre dois modelos que segue a curvatura dos vetores de pesos. |
+| **Dev** | Conjunto de exemplos separado, usado só para escolher entre checkpoints. Os benchmarks nunca entram nessa escolha. |
+| **MTEB-BR, MTEB-PT** | Conjuntos de avaliação em português: o MTEB-BR tem 22 tarefas nativas do Brasil (classificação, busca, agrupamento e outras); o MTEB-PT reúne tarefas em português por família. |
+| **LongEmbed e MLDR-pt** | Avaliações com documentos longos: o LongEmbed é em inglês, com documentos de até 32k tokens; o MLDR-pt é busca em documentos longos em português. |
+| **Passkey e Needle** | Testes do LongEmbed em que uma informação curta é escondida num texto longo, e o modelo precisa achar o documento que a contém. |
+| **nDCG@10** | Nota de 0 a 100 que mede se os documentos certos aparecem entre os 10 primeiros resultados da busca, valendo mais quanto mais perto do topo. |
+| **Classificação, clusterização, STS, reranking** | Tipos de tarefa: atribuir rótulos a textos; agrupar textos por tema; dar nota à semelhança entre duas frases; reordenar uma lista de candidatos. |
+| **IC 95 %, p-valor e empate estatístico** | O IC é a margem de incerteza de uma média. O p-valor é a chance de uma diferença daquele tamanho aparecer só por acaso. Com p ≥ 0,05, nenhuma diferença é declarada: os modelos estão em empate estatístico. |
+| **Contaminação** | Quando textos dos testes aparecem no treino e inflam as notas. Aqui, eles são filtrados antes do treino, e uma auditoria confere o resultado. |
 
 ## Reprodução
 
