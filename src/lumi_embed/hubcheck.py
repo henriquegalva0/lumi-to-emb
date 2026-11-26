@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 from .utils import EmbedError, ckpt_dir, results_dir, write_json
 
@@ -31,6 +32,7 @@ DISTRACTORS = [
     "Bolo de cenoura com cobertura de chocolate é uma receita tradicional.",
 ]
 MIN_COS = 0.995  # bf16 do Hub (PyTorch puro ou kernels) contra o checkpoint local
+TF_MAX_LENGTH = 8192  # max_length do trecho "Transformers" do card (o do modelo publicado)
 INDEX = "model.safetensors.index.json"
 
 
@@ -75,7 +77,7 @@ def card_transformers(repo: str, device: str):
     def embed(texts, instruction=None):
         if instruction:
             texts = [f"Instruct: {instruction}\nQuery: {t}" for t in texts]
-        batch = tok(texts, padding=True, truncation=True, max_length=512, return_tensors="pt").to(device)
+        batch = tok(texts, padding=True, truncation=True, max_length=TF_MAX_LENGTH, return_tensors="pt").to(device)
         with torch.no_grad():
             h = model(**batch, use_cache=False).last_hidden_state
         last = batch["attention_mask"].sum(dim=1) - 1
@@ -100,7 +102,8 @@ def run_hubcheck(cfg: dict, repo: str | None = None, local: str | None = None, d
     from .modeling.export import DEFAULT_QUERY_INSTRUCTION
 
     repo = repo or cfg["hub"]["repo"]
-    local = local or str(ckpt_dir("lumi-emb") / "model")
+    local = local or str(ckpt_dir(cfg["hub"].get("release", "lumi-emb")) / "model")
+    want_len = json.loads((Path(local) / "sentence_bert_config.json").read_text())["max_seq_length"]
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     res: dict = {"repo": repo, "local": local, "device": device, "min_cos": MIN_COS}
 
@@ -131,7 +134,8 @@ def run_hubcheck(cfg: dict, repo: str | None = None, local: str | None = None, d
         "relevant_first": bool(sim[0, 0] > sim[0, 1:].max()),
     }
     st = res["sentence_transformers"]
-    st["ok"] = st["cos_query"] >= MIN_COS and st["cos_docs"] >= MIN_COS and max_len == 512
+    st["ok"] = st["cos_query"] >= MIN_COS and st["cos_docs"] >= MIN_COS and max_len == want_len
+    st["max_seq_length_local"] = want_len
     log.info("Sentence-Transformers: %s", st)
     free()
 

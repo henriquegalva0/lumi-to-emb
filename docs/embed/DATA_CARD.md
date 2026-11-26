@@ -20,7 +20,7 @@ Um único schema JSONL para todas as tarefas ([`schema.py`](../../src/lumi_embed
 | `source` | dataset e revisão, ou gerador, persona, tipo, dificuldade e semente |
 | `split` | `train` ou `dev` (não há `test`: os testes são os benchmarks externos) |
 
-Formato de entrada no modelo: query = `Instruct: {instrução}\nQuery: {query}` + EOS; documento = texto + EOS, sem instrução. Comprimento máximo de 512 tokens no S1 e no S2; de 2k a 8k no S-long (ainda não executado nesta versão).
+Formato de entrada no modelo: query = `Instruct: {instrução}\nQuery: {query}` + EOS; documento = texto + EOS, sem instrução. Comprimento máximo de 512 tokens no S1 e no S2; de 2k a 8k no S-long.
 
 ## Fontes reais (D<sub>real</sub>)
 
@@ -152,7 +152,7 @@ Fontes de `results/embed/contamination/report.md`, `data/embed/mined/stats_*.jso
 | Retrieval curto | 499.954 | 443.590 | 56.264 | 100 | 0,711 |
 | STS | 86.342 | 86.270 | 68 | 4 | 0,901 |
 | Bitexto | 59.927 | 59.927 | 0 | 0 | 0,923 |
-| Retrieval longo | — | — | — | — | adiada (`mining.defer_families`) |
+| Retrieval longo | 20.356 | 17.224 | 0 (sem o filtro de cosseno nesta família; ver DECISIONS) | 3.132 | 0,712 |
 
 **Conjuntos** (exemplos de treino por componente):
 
@@ -163,7 +163,7 @@ Fontes de `results/embed/contamination/report.md`, `data/embed/mined/stats_*.jso
 | S2-real | 22.500 | — | — | 34.286 | 34.286 | 91.072 |
 | S2-syn | — | 37.500 | 36.642 | — | — | 74.142 |
 
-Dev: 1.500 exemplos por estágio. A R1 tem 29.994 queries do mMARCO-PT. O S-long ficou vazio, porque a família de retrieval longo ainda não foi minerada. No S2-real, só 22,5 mil dos 91 mil exemplos são em PT nativo (Wikipédia); o resto é mMARCO traduzido e inglês/bitexto.
+Dev: 1.500 exemplos por estágio. A R1 tem 29.994 queries do mMARCO-PT. O S-long tem 24.177 exemplos de treino: 16.924 de retrieval longo e 7.253 curtos do S2, repetidos (30 %, sem os 125 acusados pela auditoria). Tem também 300 de dev, avaliados contra 1.000 documentos longos. No S2-real, só 22,5 mil dos 91 mil exemplos são em PT nativo (Wikipédia); o resto é mMARCO traduzido e inglês/bitexto.
 
 ## Licenças: o que isto implica para o modelo (decisão D2)
 

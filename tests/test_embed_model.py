@@ -179,6 +179,28 @@ def test_hubcheck_runs_card_snippets_against_published_model(tiny_dir, tmp_path,
     assert res["sentence_transformers"]["cos_query"] >= 0.98 and res["transformers"]["cos_query"] >= 0.98
 
 
+def test_hubcheck_uses_release_from_config_and_its_max_length(tiny_dir, tmp_path, monkeypatch):
+    # O main tem o modelo de hub.release (lumi-emb-long, 8k): o hubcheck compara com ele, e o
+    # max_seq_length esperado do Sentence-Transformers é o do checkpoint local, não 512 fixo.
+    import json
+
+    from lumi_embed import hubcheck
+    from lumi_embed.utils import EmbedError
+
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    out = save_embedder(load(tiny_dir), tmp_path / "checkpoints" / "lumi-emb-long" / "model", meta={"seed": 0},
+                        dtype=torch.float32)
+    st = out / "sentence_bert_config.json"
+    st.write_text(json.dumps({**json.loads(st.read_text()), "max_seq_length": 8192}))
+    monkeypatch.setattr(hubcheck, "MIN_COS", 0.98)
+    with pytest.raises(EmbedError, match="sanity"):
+        hubcheck.run_hubcheck({"hub": {"repo": str(out), "release": "lumi-emb-long"}}, device="cpu",
+                              api=_fake_hub(out))
+    res = json.loads((tmp_path / "results/embed/hubcheck.json").read_text())
+    assert res["local"] == str(out) and res["checks"]["sentence_transformers"]
+    assert res["sentence_transformers"]["max_seq_length"] == res["sentence_transformers"]["max_seq_length_local"] == 8192
+
+
 def test_hubcheck_fails_on_branch_with_stray_shards(tiny_dir, tmp_path, monkeypatch):
     from lumi_embed import hubcheck
     from lumi_embed.utils import EmbedError

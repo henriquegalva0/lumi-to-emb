@@ -45,6 +45,8 @@ def card_files() -> dict[str, Path]:
     for p in sorted((REPO_ROOT / "docs" / "embed").glob("*")):
         if p.is_file():
             files[f"docs/{p.name}"] = p
+    for p in sorted((REPO_ROOT / "docs" / "embed" / "figures").glob("*.png")):
+        files[f"docs/figures/{p.name}"] = p
     for p in sorted((REPO_ROOT / "docs" / "stage1").glob("*")):
         if p.is_file() and p.suffix in (".md", ".png", ".csv", ".json"):
             files[f"docs/stage1/{p.name}"] = p

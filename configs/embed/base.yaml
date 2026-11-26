@@ -23,3 +23,4 @@ embedding:
 
 hub:
   repo: henriquegalvao/lumi-4b-embedding
+  release: lumi-emb-long           # o que vai no main (publish --release); o hubcheck compara com ele

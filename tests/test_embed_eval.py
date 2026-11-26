@@ -1,5 +1,6 @@
 """Estatística, relatório (só a partir de arquivos de resultado) e adaptador do mteb."""
 
+import importlib.util
 import json
 
 import pytest
@@ -106,6 +107,68 @@ def test_report_release_seeds_and_hypotheses(tmp_path, monkeypatch):
     sec = md.split("## Sensibilidade à contaminação")[1].split("\n## ")[0]
     row = next(line for line in sec.splitlines() if line.startswith("| Qwen3-Embedding-4B"))
     assert "| 66.05 | 66.03 |" in row and "-4.00" in row and "Mean21" in sec
+
+
+def test_highlights_and_figures_come_from_result_files(tmp_path, monkeypatch):
+    # O bloco de destaques (README e card) e as figuras saem só das notas: o modelo publicado contra o
+    # lumi-emb e os baselines, com o MLDR-pt em 8k vindo do cache separado (sufixo L8192).
+    monkeypatch.setenv("LUMI_WORKDIR", str(tmp_path))
+    monkeypatch.setattr(rep, "REPO_ROOT", tmp_path)
+    block = "intro\n<!-- HIGHLIGHTS:START -->\nvelho\n<!-- HIGHLIGHTS:END -->\nfim\n"
+    (tmp_path / "README.md").write_text(block)
+    (tmp_path / "docs" / "huggingface").mkdir(parents=True)
+    (tmp_path / "docs" / "huggingface" / "README.md").write_text(block + "<!-- RESULTS:START -->\n<!-- RESULTS:END -->\n")
+    cache = tmp_path / "results" / "embed" / "mteb"
+    for i, t in enumerate(rep.MTEB_BR_TASKS):
+        _write_result(cache, "lumi-embed/lumi-emb-long", t, 0.62 + 0.001 * i)
+        _write_result(cache, "lumi-embed/lumi-emb", t, 0.62 + 0.001 * i - (0.002 if i % 2 else -0.002))
+        _write_result(cache, "lumi-embed/R0", t, 0.30)
+        _write_result(cache, rep.QWEN4B, t, 0.50 if t == "HateBR" else 0.65 + 0.001 * i)
+        _write_result(cache, rep.QWEN8B, t, 0.55 if t == "HateBR" else 0.67 + 0.001 * i)
+    for m, v512, v8k in (("lumi-embed/lumi-emb", 0.62, 0.4788), ("lumi-embed/lumi-emb-long", 0.64, 0.7394),
+                         (rep.QWEN4B, 0.67, 0.80)):
+        _write_result(cache, m, "MultiLongDocRetrieval", v512)
+        _write_result(cache, f"{m}-{rep.LONG_TAG}", "MultiLongDocRetrieval", v8k)
+    rel = tmp_path / "checkpoints" / "lumi-emb-long"
+    rel.mkdir(parents=True)
+    (rel / "choice.json").write_text(json.dumps({"source": "M-L", "merge_selected_variant": "M-L-x"}))
+    md = rep.build_report({})
+    pair = next(line for line in md.splitlines() if line.startswith("| lumi-emb-long − Qwen3-Embedding-4B"))
+    assert "1/22" in pair                                   # só o HateBR
+    assert "| lumi-emb-long − lumi-emb |" in md
+    out = (tmp_path / "README.md").read_text()
+    assert "velho" not in out and out.startswith("intro") and out.endswith("fim\n")
+    assert "| **73.94** | 47.88 sem o estágio longo (+26.06); 64.00 lendo só os primeiros 512 tokens |" in out
+    assert "| MTEB-BR (22 tarefas nativas em PT-BR) | **" in out and "30.00 do Lumi-4B sem treino" in out
+    assert "| HateBR | Classificação | **62.00** | 50.00 | +12.00 | ✓ |" in out   # > 4B e > 8B
+    assert "| Quati |" not in out                           # perde para o 4B: fica fora da lista
+    assert "O contexto longo não custou nada" in out         # lumi-emb-long − lumi-emb sem diferença
+    card = (tmp_path / "docs" / "huggingface" / "README.md").read_text()
+    assert "HateBR" in card and "<picture>" not in card     # no card, imagens simples (docs/figures/)
+    figs = tmp_path / "docs" / "embed" / "figures"
+    if importlib.util.find_spec("matplotlib"):
+        assert {p.name for p in figs.glob("*.png")} >= {"mldr-pt-light.png", "mldr-pt-dark.png",
+                                                       "mteb-br-categories-light.png", "mteb-br-ranking-dark.png"}
+        assert 'srcset="docs/embed/figures/mldr-pt-dark.png"' in out
+        assert "](docs/figures/mteb-br-ranking-light.png)" in card
+
+
+def test_figures_render_all_kinds(tmp_path):
+    pytest.importorskip("matplotlib")
+    from lumi_embed.eval.figures import render
+
+    spec = {
+        "a": ("mldr_slope", {"data": [("x", "muted", 62.0, 47.9), ("y", "s1", 64.0, 73.9), ("z", "s2", 66.9, 80.2)]}),
+        "b": ("length_curves", {"data": {"Passkey": {"y": {256: 90, 8192: 100, 16384: 92}, "z": {256: 100, 8192: 96}}},
+                                "roles": {"y": "s1", "z": "s2"}, "trained": 8192}),
+        "c": ("category_dots", {"cats": ["Cls", "Ret"], "series": [("y", "s1", [67.7, 62.6]), ("z", "s2", [63.7, 62.3]),
+                                                                   ("w", "s3", [67.1, 64.8])]}),
+        "d": ("ranking_bars", {"rows": [("y", "s1", 62.5), ("z", "muted", 65.5), ("r", "muted", 30.6)],
+                               "title": "t", "subtitle": "s"}),
+    }
+    out = render(spec, tmp_path)
+    assert len(out) == 8 and all(p.stat().st_size > 5000 for p in out)
+    assert {p.name for p in out} >= {"a-light.png", "a-dark.png", "d-light.png"}
 
 
 def test_instruction_resolution():

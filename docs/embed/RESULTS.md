@@ -4,6 +4,8 @@ Gerado por `lumi_embed report` a partir de `results/embed/`. Notas × 100. Célu
 
 O **lumi-emb** é o checkpoint `M-C` (M-C-base0.75), escolhido no dev pela regra: merge se dev(merge) >= dev(melhor individual); senão o melhor individual (dev mean nDCG@10, desempate Borda). Benchmarks não entram na escolha.
 
+O **lumi-emb-long** é o checkpoint `M-L` (M-L-slerp-C3-long-lumi-emb-t0.25), escolhido no dev curto + longo pela mesma regra.
+
 ## Tabela 12 — Visão geral
 
 | Modelo | MTEB-BR Mean22 [IC 95%] | PT STS | PT Cls | PT Ret | PT Rer | MMTEB | MTEB eng v2 | LongEmbed |
@@ -21,14 +23,14 @@ O **lumi-emb** é o checkpoint `M-C` (M-C-base0.75), escolhido no dev pela regra
 | C2-naivehn | — | — | — | — | — | — | — | — |
 | C2-ib | — | — | — | — | — | — | — | — |
 | C2-direct | — | — | — | — | — | — | — | — |
-| C3-long | — | — | — | — | — | — | — | — |
+| C3-long | — | — | — | — | — | — | — | 57.54 |
 | B2a | — | — | — | — | — | — | — | — |
 | B2f | — | — | — | — | — | — | — | — |
 | M-C | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | 63.30 | 47.50 |
 | M-B | — | — | — | — | — | — | — | — |
-| M-L | — | — | — | — | — | — | — | — |
+| M-L | 62.48 [54.40, 70.10] | 78.80 | 56.21 | 77.87 | 84.91 | — | — | 56.06 |
 | lumi-emb | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | 63.30 | 47.50 |
-| lumi-emb-long | — | — | — | — | — | — | — | — |
+| lumi-emb-long | 62.48 [54.40, 70.10] | 78.80 | 56.21 | 77.87 | 84.91 | — | — | 56.06 |
 | Qwen3-Embedding-4B | 65.53 [57.33, 73.25] | 83.94 | 58.24 | 77.14 | 84.56 | — | — | 80.12 |
 | Qwen3-Embedding-8B | 67.35 [59.41, 74.86] | 84.66 | 62.61 | 78.85 | 85.99 | — | — | — |
 | Qwen3-Embedding-0.6B | 61.67 [53.93, 69.10] | 79.72 | 52.41 | 74.53 | 83.82 | — | — | — |
@@ -56,9 +58,9 @@ O **lumi-emb** é o checkpoint `M-C` (M-C-base0.75), escolhido no dev pela regra
 | B2f | — | — | — | — | — | — | — |
 | M-C | 67.34 | 29.63 | 85.03 | 74.78 | 52.90 | 62.18 | 58.36 |
 | M-B | — | — | — | — | — | — | — |
-| M-L | — | — | — | — | — | — | — |
+| M-L | 67.73 | 29.92 | 84.22 | 73.49 | 53.31 | 62.56 | 58.17 |
 | lumi-emb | 67.34 | 29.63 | 85.03 | 74.78 | 52.90 | 62.18 | 58.36 |
-| lumi-emb-long | — | — | — | — | — | — | — |
+| lumi-emb-long | 67.73 | 29.92 | 84.22 | 73.49 | 53.31 | 62.56 | 58.17 |
 | Qwen3-Embedding-4B | 63.71 | 36.46 | 87.16 | 80.64 | 64.93 | 62.29 | 58.21 |
 | Qwen3-Embedding-8B | 67.13 | 38.96 | 88.24 | 81.24 | 65.27 | 64.81 | 60.07 |
 | Qwen3-Embedding-0.6B | 62.66 | 32.56 | 81.38 | 76.22 | 59.64 | 58.22 | 55.39 |
@@ -66,30 +68,30 @@ O **lumi-emb** é o checkpoint `M-C` (M-C-base0.75), escolhido no dev pela regra
 
 ## Tabela 13b — MTEB-BR por tarefa (seleção; completo em CSV)
 
-| Tarefa | R0 | C1 | C2 | C2-real | C2-syn | lumi-emb | Qwen3-Embedding-4B |
-|---|---|---|---|---|---|---|---|
-| HateBR | 66.57 | 84.79 | 84.82 | 84.64 | 85.24 | 85.26 | 82.81 |
-| ToxSynPT | 80.23 | 90.09 | 89.84 | 90.07 | 89.95 | 90.16 | 85.18 |
-| FactckBrClassification | 49.15 | 54.09 | 53.13 | 54.17 | 53.32 | 54.56 | 53.75 |
-| PortuLexRRIP | 43.44 | 38.55 | 38.76 | 39.15 | 37.89 | 39.38 | 33.09 |
-| BrighterEmotionMultilabelClassification | 21.39 | 29.57 | 29.62 | 29.51 | 29.92 | 29.63 | 36.46 |
-| AssinRTE | 52.40 | 81.00 | 82.12 | 81.47 | 82.06 | 83.34 | 86.03 |
-| InferBR | 39.81 | 86.50 | 87.00 | 86.46 | 86.32 | 86.73 | 88.29 |
-| AssinSTS | 45.40 | 68.27 | 70.75 | 69.02 | 70.03 | 72.67 | 79.77 |
-| Assin2STS | 43.59 | 75.51 | 76.57 | 76.14 | 75.62 | 76.89 | 81.52 |
-| WikipediaPTCategoriesClusteringP2P | 49.58 | 60.89 | 61.86 | 62.36 | 58.19 | 59.24 | 76.21 |
-| MedPTClustering | 55.35 | 68.15 | 66.38 | 66.88 | 65.36 | 65.15 | 81.50 |
-| JurisTCUClusteringP2P | 11.69 | 31.81 | 32.03 | 30.47 | 29.96 | 32.21 | 28.27 |
-| SciELOClusteringP2P | 38.76 | 60.82 | 59.39 | 62.45 | 55.53 | 62.52 | 74.08 |
-| StackoverflowPtClustering | 31.49 | 42.24 | 44.61 | 44.35 | 42.57 | 45.37 | 64.58 |
-| Quati | 0.00 | 60.06 | 60.67 | 59.40 | 60.71 | 61.14 | 60.76 |
-| JurisTCU | 0.78 | 60.90 | 61.08 | 59.83 | 60.62 | 60.91 | 61.36 |
-| BRTaxQAR | 1.37 | 21.25 | 21.07 | 20.15 | 20.34 | 21.18 | 28.86 |
-| FaQuADIR | 3.41 | 81.31 | 82.35 | 80.07 | 83.17 | 81.43 | 80.70 |
-| MedPTRetrieval | 2.13 | 78.88 | 77.62 | 79.33 | 76.77 | 79.40 | 77.62 |
-| FaqBacenRetrieval | 0.95 | 68.08 | 68.22 | 67.76 | 66.72 | 69.03 | 64.42 |
-| QuatiReranking | 19.65 | 60.55 | 60.14 | 60.16 | 59.48 | 60.96 | 60.57 |
-| JurisTCUReranking | 17.23 | 55.78 | 55.28 | 54.43 | 55.28 | 55.77 | 55.85 |
+| Tarefa | R0 | C1 | C2 | C2-real | C2-syn | lumi-emb | lumi-emb-long | Qwen3-Embedding-4B |
+|---|---|---|---|---|---|---|---|---|
+| HateBR | 66.57 | 84.79 | 84.82 | 84.64 | 85.24 | 85.26 | 85.62 | 82.81 |
+| ToxSynPT | 80.23 | 90.09 | 89.84 | 90.07 | 89.95 | 90.16 | 90.36 | 85.18 |
+| FactckBrClassification | 49.15 | 54.09 | 53.13 | 54.17 | 53.32 | 54.56 | 54.67 | 53.75 |
+| PortuLexRRIP | 43.44 | 38.55 | 38.76 | 39.15 | 37.89 | 39.38 | 40.27 | 33.09 |
+| BrighterEmotionMultilabelClassification | 21.39 | 29.57 | 29.62 | 29.51 | 29.92 | 29.63 | 29.92 | 36.46 |
+| AssinRTE | 52.40 | 81.00 | 82.12 | 81.47 | 82.06 | 83.34 | 81.98 | 86.03 |
+| InferBR | 39.81 | 86.50 | 87.00 | 86.46 | 86.32 | 86.73 | 86.46 | 88.29 |
+| AssinSTS | 45.40 | 68.27 | 70.75 | 69.02 | 70.03 | 72.67 | 70.85 | 79.77 |
+| Assin2STS | 43.59 | 75.51 | 76.57 | 76.14 | 75.62 | 76.89 | 76.13 | 81.52 |
+| WikipediaPTCategoriesClusteringP2P | 49.58 | 60.89 | 61.86 | 62.36 | 58.19 | 59.24 | 60.65 | 76.21 |
+| MedPTClustering | 55.35 | 68.15 | 66.38 | 66.88 | 65.36 | 65.15 | 64.77 | 81.50 |
+| JurisTCUClusteringP2P | 11.69 | 31.81 | 32.03 | 30.47 | 29.96 | 32.21 | 31.48 | 28.27 |
+| SciELOClusteringP2P | 38.76 | 60.82 | 59.39 | 62.45 | 55.53 | 62.52 | 62.78 | 74.08 |
+| StackoverflowPtClustering | 31.49 | 42.24 | 44.61 | 44.35 | 42.57 | 45.37 | 46.85 | 64.58 |
+| Quati | 0.00 | 60.06 | 60.67 | 59.40 | 60.71 | 61.14 | 61.81 | 60.76 |
+| JurisTCU | 0.78 | 60.90 | 61.08 | 59.83 | 60.62 | 60.91 | 60.42 | 61.36 |
+| BRTaxQAR | 1.37 | 21.25 | 21.07 | 20.15 | 20.34 | 21.18 | 22.13 | 28.86 |
+| FaQuADIR | 3.41 | 81.31 | 82.35 | 80.07 | 83.17 | 81.43 | 82.42 | 80.70 |
+| MedPTRetrieval | 2.13 | 78.88 | 77.62 | 79.33 | 76.77 | 79.40 | 80.06 | 77.62 |
+| FaqBacenRetrieval | 0.95 | 68.08 | 68.22 | 67.76 | 66.72 | 69.03 | 68.54 | 64.42 |
+| QuatiReranking | 19.65 | 60.55 | 60.14 | 60.16 | 59.48 | 60.96 | 60.65 | 60.57 |
+| JurisTCUReranking | 17.23 | 55.78 | 55.28 | 54.43 | 55.28 | 55.77 | 55.69 | 55.85 |
 
 ## Variação entre sementes (C2)
 
@@ -112,9 +114,10 @@ Mesma receita e mesmos dados; muda só a semente. Diferenças entre checkpoints 
 
 ## Tabela 14 — Comparação com modelos correspondentes
 
-| Modelo | Relação com o lumi-emb | MTEB-BR Mean22 | MTEB-PT (STS/Cls/Ret/Rer) | MMTEB | LongEmbed |
+| Modelo | Relação | MTEB-BR Mean22 | MTEB-PT (STS/Cls/Ret/Rer) | MMTEB | LongEmbed |
 |---|---|---|---|---|---|
-| lumi-emb (este trabalho) | — | 62.41 | 79.5 / 55.4 / 77.8 / 85.4 | — | 47.50 |
+| lumi-emb-long (este trabalho) | Modelo publicado (até 8k tokens) | 62.48 | 78.8 / 56.2 / 77.9 / 84.9 | — | 56.06 |
+| lumi-emb (este trabalho) | Versão curta (até 512 tokens) | 62.41 | 79.5 / 55.4 / 77.8 / 85.4 | — | 47.50 |
 | R0 (este trabalho) | Ponto de partida | 30.65 | 42.7 / 43.6 / 0.2 / 52.0 | — | — |
 | Qwen3-Embedding-4B | Mesmo porte, Transformer, líder aberto em PT | 65.53 (medido) | 83.9 / 58.2 / 77.1 / 84.6 (medido) | a medir | 80.12 (medido) |
 | Qwen3-Embedding-8B | Líder aberto no MTEB-BR | 67.35 (medido) | 84.7 / 62.6 / 78.9 / 86.0 (medido) | 70.58 [10] | a medir |
@@ -130,6 +133,11 @@ Valores com referência entre colchetes vêm da literatura (ver o plano); "(medi
 
 | Comparação | Δ Mean22 [IC 95%] | p | Vitórias (tarefas) |
 |---|---|---|---|
+| lumi-emb-long − Qwen3-Embedding-4B | -3.05 [-6.04, -0.25] | 0.033 | 10/22 |
+| lumi-emb-long − Qwen3-Embedding-8B | -4.87 [-7.33, -2.50] | < 0.001 | 3/22 |
+| lumi-emb-long − Qwen3-Embedding-0.6B | +0.81 [-1.74, +3.21] | 0.518 | 13/22 |
+| lumi-emb-long − multilingual-e5-large-instruct | -1.17 [-3.68, +1.20] | 0.350 | 10/22 |
+| lumi-emb-long − lumi-emb | +0.07 [-0.28, +0.41] | 0.671 | 12/22 |
 | lumi-emb − Qwen3-Embedding-4B | -3.13 [-6.21, -0.29] | 0.030 | 10/22 |
 | lumi-emb − Qwen3-Embedding-8B | -4.95 [-7.57, -2.53] | < 0.001 | 3/22 |
 | lumi-emb − Qwen3-Embedding-0.6B | +0.74 [-1.92, +3.14] | 0.560 | 14/22 |
@@ -141,6 +149,8 @@ Valores com referência entre colchetes vêm da literatura (ver o plano); "(medi
 | Modelo | MLDR-pt, 512 tokens | MLDR-pt, 8k tokens |
 |---|---|---|
 | lumi-emb | 61.99 | 47.88 |
+| C3-long | — | 75.68 |
+| lumi-emb-long | 63.99 | 73.94 |
 | Qwen3-Embedding-4B | 66.92 | 80.23 |
 
 MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). No MTEB-PT ele é avaliado com 512 tokens, como todo o protocolo; aqui, também com os documentos em até 8k tokens.
@@ -151,6 +161,10 @@ MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). 
 |---|---|---|---|---|---|---|---|---|---|
 | lumi-emb | Passkey | 96 | 96 | 100 | 100 | 100 | 100 | 66 | 48 |
 | lumi-emb | Needle | 80 | 82 | 72 | 78 | 50 | 22 | 0 | 4 |
+| C3-long | Passkey | 90 | 96 | 100 | 100 | 100 | 100 | 96 | 48 |
+| C3-long | Needle | 88 | 86 | 88 | 90 | 82 | 48 | 2 | 4 |
+| lumi-emb-long | Passkey | 90 | 96 | 100 | 100 | 100 | 100 | 92 | 50 |
+| lumi-emb-long | Needle | 86 | 86 | 86 | 90 | 78 | 40 | 2 | 4 |
 | Qwen3-Embedding-4B | Passkey | 100 | 98 | 98 | 94 | 100 | 96 | 90 | 96 |
 | Qwen3-Embedding-4B | Needle | 84 | 76 | 58 | 60 | 86 | 82 | 74 | 82 |
 
@@ -158,14 +172,15 @@ MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). 
 
 A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de treino que coincidem com textos destas tarefas, que o índice usado no filtro não cobria: Quati, BRTaxQAR, FaQuADIR, QuatiReranking. São no máximo 0,1 % dos exemplos de cada conjunto. Para medir o efeito, a média é refeita sem essas tarefas, e a comparação pareada é repetida.
 
-| Modelo | Mean22 | Mean18 (sem as 4) | lumi-emb − modelo (22) | lumi-emb − modelo (18) | p (18) |
+| Modelo | Mean22 | Mean18 (sem as 4) | lumi-emb-long − modelo (22) | lumi-emb-long − modelo (18) | p (18) |
 |---|---|---|---|---|---|
-| lumi-emb | 62.41 | 63.79 | — | — | — |
-| C2 | 61.97 | 63.28 | +0.44 | +0.51 [-0.07, +1.06] | 0.085 |
-| Qwen3-Embedding-4B | 65.53 | 67.27 | -3.13 | -3.48 [-7.18, -0.07] | 0.047 |
-| Qwen3-Embedding-8B | 67.35 | 68.85 | -4.95 | -5.06 [-8.15, -2.24] | < 0.001 |
-| Qwen3-Embedding-0.6B | 61.67 | 63.15 | +0.74 | +0.64 [-2.56, +3.51] | 0.659 |
-| multilingual-e5-large-instruct | 63.65 | 65.89 | -1.25 | -2.10 [-4.99, +0.67] | 0.139 |
+| lumi-emb-long | 62.48 | 63.75 | — | — | — |
+| lumi-emb | 62.41 | 63.79 | +0.07 | -0.04 [-0.44, +0.35] | 0.847 |
+| C2 | 61.97 | 63.28 | +0.51 | +0.47 [-0.11, +1.10] | 0.118 |
+| Qwen3-Embedding-4B | 65.53 | 67.27 | -3.05 | -3.52 [-7.12, -0.12] | 0.042 |
+| Qwen3-Embedding-8B | 67.35 | 68.85 | -4.87 | -5.10 [-8.00, -2.32] | < 0.001 |
+| Qwen3-Embedding-0.6B | 61.67 | 63.15 | +0.81 | +0.60 [-2.46, +3.45] | 0.673 |
+| multilingual-e5-large-instruct | 63.65 | 65.89 | -1.17 | -2.14 [-4.99, +0.69] | 0.139 |
 
 ## Tabela 15 — Ablações (MTEB-BR)
 
@@ -197,7 +212,7 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
 | H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
 | H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
-| H7 | Vantagem relativa em entradas longas | lumi-emb − Qwen3-Embedding-4B, LongEmbed | -32.62 | — | Refutada |
+| H7 | Vantagem relativa em entradas longas | C3-long − Qwen3-Embedding-4B, LongEmbed | -22.58 | — | Refutada |
 
 "Refutada" / "Não refutada" aplicam o critério de falseamento do plano; "—" = falta executar. H6 usa o dev (critério do plano), sem IC.
 
@@ -211,8 +226,11 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | C2-s3 | 0.9764 | 937 | 247.3 |  |
 | C2-real | 0.9771 | 711 | 187.6 |  |
 | C2-syn | 0.9726 | 579 | 157.8 |  |
+| C3-long | 0.9756 | 755 | 850.4 |  |
 | M-C | 0.9779 | — | — | = M-C-base0.75 |
+| M-L | 0.9756 | — | — | = M-L-slerp-C3-long-lumi-emb-t0.25 |
 | lumi-emb | 0.9779 | — | — | = M-C (M-C-base0.75) |
+| lumi-emb-long | 0.9756 | — | — | = M-L-slerp-C3-long-lumi-emb-t0.25 |
 
 ## Grade do merge M-C (dev)
 
@@ -230,4 +248,15 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | M-C-base0.5 | 0.9739 | 11.0 |  |
 | C2-syn | 0.9726 | 9.0 |  |
 | M-C-base0.25 | 0.9608 | 0.0 |  |
+
+## Grade do merge M-L (dev)
+
+| Candidato | dev nDCG@10 | Borda |  |
+|---|---|---|---|
+| C3-long | 0.9756 | 8.5 | melhor individual |
+| M-L-slerp-C3-long-lumi-emb-t0.25 | 0.9756 | 7.5 | escolhido |
+| M-L-slerp-C3-long-lumi-emb-t0.5 | 0.9753 | 12.0 |  |
+| M-L-avg | 0.9748 | 13.0 |  |
+| M-L-slerp-C3-long-lumi-emb-t0.75 | 0.9689 | 7.5 |  |
+| lumi-emb | 0.9572 | 11.5 |  |
 

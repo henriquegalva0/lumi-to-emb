@@ -6,7 +6,8 @@ já presentes no plano, sempre com a referência entre colchetes. Notas × 100.
 
 Saídas: results/embed/tables/*.csv, docs/embed/RESULTS.md (completo) e, no model card
 (docs/huggingface/README.md), o bloco entre <!-- RESULTS:START --> e <!-- RESULTS:END -->,
-regenerado numa versão resumida (só linhas com resultado).
+regenerado numa versão resumida (só linhas com resultado). Os destaques (bloco <!-- HIGHLIGHTS -->
+do README e do card) e as figuras (docs/embed/figures/) saem das mesmas notas.
 
 O lumi-emb é uma cópia de um checkpoint (checkpoints/lumi-emb/choice.json). Ele é avaliado com o
 próprio nome; a origem (ex.: M-C) recebe as mesmas notas, porque os pesos são os mesmos.
@@ -31,6 +32,10 @@ CHECKPOINTS = ["R0", "R0e", "R1", "C1", "C2", "C2-s2", "C2-s3", "C2-real", "C2-s
                "C2-ib", "C2-direct", "C3-long", "B2a", "B2f", "M-C", "M-B", "M-L", "lumi-emb", "lumi-emb-long"]
 RELEASES = ["lumi-emb", "lumi-emb-long"]  # cópias de um checkpoint escolhido (choice.json)
 LONG_TAG = "L8192"                         # sufixo do cache do MLDR-pt em 8k (eval.yaml, mldr_pt_long)
+LONG_MAX = 8192                            # maior comprimento do currículo do estágio longo (train/_long.yaml)
+# Modelo no main do Hub (o mesmo de hub.release em configs/embed/base.yaml). As comparações pareadas e os
+# destaques usam ele quando já tem as 22 tarefas do MTEB-BR; senão, o lumi-emb.
+MAIN = "lumi-emb-long"
 SEEDS = ["C2", "C2-s2", "C2-s3"]  # mesma receita, sementes 1–3: variação entre execuções
 MTEB_BR_CATEGORIES = {
     "Classificação (4)": ["HateBR", "ToxSynPT", "FactckBrClassification", "PortuLexRRIP"],
@@ -70,6 +75,7 @@ ABLATIONS = [
     ("A13", "Contexto longo", "C3-long", "C2"),
 ]
 QWEN4B = "Qwen/Qwen3-Embedding-4B"
+QWEN8B = "Qwen/Qwen3-Embedding-8B"
 # Valores da literatura reproduzidos do plano (Tabelas 8–10 e 14), com a fonte (× 100).
 LITERATURE = [
     {"model": "Qwen3-Embedding-4B", "rel": "Mesmo porte, Transformer, líder aberto em PT", "mteb_br": "66.21 [16]",
@@ -200,16 +206,24 @@ def release_info(name: str = "lumi-emb") -> dict:
     return _json(ckpt_dir(name) / "choice.json")
 
 
-def mldr_long_rows(S: dict, baselines: list[str]) -> list[list]:
-    """MLDR-pt em 512 (MTEB-PT) e em 8k (suíte mldr_pt_long), para quem tem o resultado em 8k."""
-    rows = []
-    models = [(c, c, model_name(c)) for c in ("lumi-emb", "C3-long", "M-L", "lumi-emb-long")]
-    models += [(BASELINE_NAMES[b], b, b) for b in baselines]
-    for label, c, name in models:
+def main_ref(S: dict) -> str:
+    return MAIN if _complete(S.get(MAIN, {})) else "lumi-emb"
+
+
+def long_values(S: dict, baselines: list[str]) -> dict[str, tuple]:
+    """{checkpoint ou hf_id: (MLDR-pt em 512, MLDR-pt em 8k)} para quem tem o resultado em 8k."""
+    out = {}
+    for c in ["lumi-emb", "C3-long", "M-L", "lumi-emb-long"] + list(baselines):
+        name = c if c in BASELINE_NAMES else model_name(c)
         long = load_scores(results_dir("mteb"), f"{name}-{LONG_TAG}", PT).get("MultiLongDocRetrieval")
         if long is not None:
-            rows.append([label, _pct(S.get(c, {}).get("MultiLongDocRetrieval")), _pct(long)])
-    return rows
+            out[c] = (S.get(c, {}).get("MultiLongDocRetrieval"), long)
+    return out
+
+
+def mldr_long_rows(S: dict, baselines: list[str]) -> list[list]:
+    """MLDR-pt em 512 (MTEB-PT) e em 8k (suíte mldr_pt_long), para quem tem o resultado em 8k."""
+    return [[BASELINE_NAMES.get(c, c), _pct(v512), _pct(v8k)] for c, (v512, v8k) in long_values(S, baselines).items()]
 
 
 def suite_lists() -> dict[str, list[str]]:
@@ -241,16 +255,17 @@ def contamination_rows(S: dict, measured: list[str]) -> tuple[list[str], list[li
     if not flagged:
         return [], [], []
     clean = [t for t in MTEB_BR_TASKS if t not in flagged]
-    h = ["Modelo", "Mean22", f"Mean{len(clean)} (sem as {len(flagged)})", "lumi-emb − modelo (22)",
-         f"lumi-emb − modelo ({len(clean)})", f"p ({len(clean)})"]
+    ref = main_ref(S)
+    h = ["Modelo", "Mean22", f"Mean{len(clean)} (sem as {len(flagged)})", f"{ref} − modelo (22)",
+         f"{ref} − modelo ({len(clean)})", f"p ({len(clean)})"]
     rows = []
-    for c in ["lumi-emb", "C2"] + measured:
+    for c in dict.fromkeys([ref, "lumi-emb", "C2"] + measured):
         s = S[c]
         if not _complete(s):
             continue
-        r22, rc = (NA, NA) if c == "lumi-emb" else (_paired(S["lumi-emb"], s), _paired(S["lumi-emb"], s, clean))
+        r22, rc = (NA, NA) if c == ref else (_paired(S[ref], s), _paired(S[ref], s, clean))
         rows.append([BASELINE_NAMES.get(c, c), _pct(_mean(s, MTEB_BR_TASKS)), _pct(_mean(s, clean)),
-                     "—" if c == "lumi-emb" else f"{100 * r22['delta']:+.2f}" if r22.get("n") else "—",
+                     "—" if c == ref else f"{100 * r22['delta']:+.2f}" if r22.get("n") else "—",
                      _delta(rc), _p(rc)])
     return h, rows, flagged
 
@@ -407,7 +422,7 @@ def build_report(ecfg: dict) -> str:
     cols = CHECKPOINTS + measured
     _write_csv(tables / "table13b_mteb_br_tasks.csv", ["Tarefa"] + [BASELINE_NAMES.get(c, c) for c in cols],
                [[t] + [_pct(S[c].get(t)) for c in cols] for t in MTEB_BR_TASKS])
-    keep = ["R0", "C1", "C2", "C2-real", "C2-syn", "lumi-emb"] + ([QWEN4B] if QWEN4B in measured else [])
+    keep = ["R0", "C1", "C2", "C2-real", "C2-syn", "lumi-emb", "lumi-emb-long"] + ([QWEN4B] if QWEN4B in measured else [])
     md += ["## Tabela 13b — MTEB-BR por tarefa (seleção; completo em CSV)\n",
            _table(["Tarefa"] + [BASELINE_NAMES.get(c, c) for c in keep],
                   [[t] + [_pct(S[c].get(t)) for c in keep] for t in MTEB_BR_TASKS]), ""]
@@ -421,11 +436,13 @@ def build_report(ecfg: dict) -> str:
                "de 2 desvios-padrão não se distinguem da variação entre execuções.\n"]
 
     # Tabela 14 — comparação com modelos correspondentes
-    h14 = ["Modelo", "Relação com o lumi-emb", "MTEB-BR Mean22", "MTEB-PT (STS/Cls/Ret/Rer)", "MMTEB", "LongEmbed"]
+    h14 = ["Modelo", "Relação", "MTEB-BR Mean22", "MTEB-PT (STS/Cls/Ret/Rer)", "MMTEB", "LongEmbed"]
     rows14 = []
-    for c in ("lumi-emb", "R0"):
+    rel14 = {"lumi-emb-long": "Modelo publicado (até 8k tokens)", "lumi-emb": "Versão curta (até 512 tokens)",
+             "R0": "Ponto de partida"}
+    for c in rel14:
         s = S[c]
-        rows14.append([f"{c} (este trabalho)", "—" if c == "lumi-emb" else "Ponto de partida",
+        rows14.append([f"{c} (este trabalho)", rel14[c],
                        _pct(_mean(s, MTEB_BR_TASKS)), " / ".join(_pct(_mean(s, ts), 1) for ts in MTEB_PT_FAMILIES.values()),
                        _pct(xmean(c, "mmteb")), _pct(xmean(c, "longembed"))])
     for m in LITERATURE:
@@ -443,7 +460,11 @@ def build_report(ecfg: dict) -> str:
            "com o mesmo protocolo; \"a medir\" = ainda não avaliado.\n"]
 
     # Tabela 14b — comparação pareada no MTEB-BR
-    pairs = [("lumi-emb", b) for b in measured] + ([("C2", QWEN4B)] if QWEN4B in measured else [])
+    ref = main_ref(S)
+    pairs = [(ref, b) for b in measured]
+    if ref != "lumi-emb":
+        pairs += [(ref, "lumi-emb")] + [("lumi-emb", b) for b in measured]
+    pairs += [("C2", QWEN4B)] if QWEN4B in measured else []
     h14b = ["Comparação", "Δ Mean22 [IC 95%]", "p", "Vitórias (tarefas)"]
     rows14b = []
     for a, b in pairs:
@@ -501,8 +522,9 @@ def build_report(ecfg: dict) -> str:
         if not js:
             continue
         note = ""
-        if c == "lumi-emb" and rel:
-            note = f"= {rel.get('source')} ({rel.get('merge_selected_variant')})"
+        relc = release_info(c) if c in RELEASES else {}
+        if relc:
+            note = f"= {relc.get('source')} ({relc.get('merge_selected_variant')})"
         elif js.get("selected"):
             note = f"= {js['selected']}"
         rdev.append([c, f"{(js.get('dev') or {}).get('mean_ndcg@10', float('nan')):.4f}",
@@ -521,6 +543,13 @@ def build_report(ecfg: dict) -> str:
     out.write_text(text, encoding="utf-8")
     (wpath("results", "embed", "RESULTS.md")).write_text(text, encoding="utf-8")
     update_card_block(card_block(S, lists, measured, rows14b, rs and (hs, rs), rows15, rh, rdev, xmean))
+    figs = figure_spec(S, measured)
+    from .figures import render
+
+    made = {p.name.rsplit("-", 1)[0] for p in render(figs, REPO_ROOT / "docs" / "embed" / "figures")}
+    _replace_block(REPO_ROOT / "README.md", "HIGHLIGHTS", highlights(S, measured, made, _img_github))
+    _replace_block(REPO_ROOT / "docs" / "huggingface" / "README.md", "HIGHLIGHTS",
+                   highlights(S, measured, made, _img_hub))
     return text
 
 
@@ -538,10 +567,11 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev, xmean) -> s
     rows = [[n, _ci(_mean22(S[c]))] + [_pct(_mean(S[c], ts), 1) for ts in MTEB_BR_CATEGORIES.values()]
             for n, c in models]
     md += ["#### MTEB-BR (22 tarefas nativas em PT-BR)\n", _table(h, [r for r in rows if _filled(r)]), ""]
-    if rows14b:
+    ref = main_ref(S)
+    r14 = [r for r in rows14b if _filled(r) and r[0].startswith(f"{ref} − ")]
+    if r14:
         md += ["#### Comparação pareada no MTEB-BR\n",
-               _table(["Comparação", "Δ Mean22 [IC 95%]", "p", "Vitórias (tarefas)"],
-                      [r for r in rows14b if _filled(r)]), ""]
+               _table(["Comparação", "Δ Mean22 [IC 95%]", "p", "Vitórias (tarefas)"], r14), ""]
     hpt = ["Modelo"] + list(MTEB_PT_FAMILIES)
     rpt = [[n] + [_pct(_mean(S[c], ts), 1) for ts in MTEB_PT_FAMILIES.values()] for n, c in models]
     md += ["#### MTEB-PT (por família)\n", _table(hpt, [r for r in rpt if _filled(r)]), ""]
@@ -585,12 +615,153 @@ def card_block(S, lists, measured, rows14b, seeds, rows15, rh, rdev, xmean) -> s
     return "\n".join(md)
 
 
-def update_card_block(block: str) -> None:
-    card = REPO_ROOT / "docs" / "huggingface" / "README.md"
-    if not card.exists():
+def _replace_block(path: Path, tag: str, block: str) -> None:
+    """Troca o texto entre <!-- TAG:START --> e <!-- TAG:END --> (se os marcadores existirem)."""
+    if not path.exists():
         return
-    t = card.read_text(encoding="utf-8")
-    a, b = "<!-- RESULTS:START -->", "<!-- RESULTS:END -->"
+    t = path.read_text(encoding="utf-8")
+    a, b = f"<!-- {tag}:START -->", f"<!-- {tag}:END -->"
     if a in t and b in t:
         t = t.split(a)[0] + a + "\n" + block.rstrip() + "\n\n" + b + t.split(b)[1]
-        card.write_text(t, encoding="utf-8")
+        path.write_text(t, encoding="utf-8")
+
+
+def update_card_block(block: str) -> None:
+    _replace_block(REPO_ROOT / "docs" / "huggingface" / "README.md", "RESULTS", block)
+
+
+# ---------------------------------------------------------------- destaques e figuras (README e card)
+PT_FAMILY_NAMES = {"PT STS": "STS", "PT Cls": "Classificação", "PT Ret": "Retrieval", "PT Rer": "Reranking"}
+FIG_ALT = {
+    "mldr-pt": "MLDR-pt: nDCG@10 em 512 tokens e com o documento inteiro (até 8k)",
+    "mteb-br-categories": "MTEB-BR por categoria: lumi-emb-long, Qwen3-Embedding-4B e Qwen3-Embedding-8B",
+    "mteb-br-ranking": "MTEB-BR: média das 22 tarefas por modelo",
+    "longembed-length": "LongEmbed Passkey e Needle por comprimento",
+}
+
+
+def _diff(a: float, b: float) -> str:
+    """a − b com os dois já arredondados como aparecem nas tabelas (o Δ bate com a conta de cabeça)."""
+    return f"{round(100 * a, 2) - round(100 * b, 2):+.2f}"
+
+
+def _img_github(name: str) -> str:
+    base = "docs/embed/figures"
+    return (f'<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="{base}/{name}-dark.png">\n'
+            f'  <img alt="{FIG_ALT.get(name, name)}" src="{base}/{name}-light.png" width="100%">\n</picture>')
+
+
+def _img_hub(name: str) -> str:
+    return f"![{FIG_ALT.get(name, name)}](docs/figures/{name}-light.png)"
+
+
+def _label(c: str) -> str:
+    return "Lumi-4B sem treino (R0)" if c == "R0" else BASELINE_NAMES.get(c, c)
+
+
+def figure_spec(S: dict, measured: list[str]) -> dict:
+    """Dados de cada figura, só do que já tem resultado (sem resultado, a figura não sai)."""
+    ref = main_ref(S)
+    trio = ([("lumi-emb", "muted")] if ref != "lumi-emb" else []) + [(ref, "s1"), (QWEN4B, "s2")]
+    spec = {}
+    lv = long_values(S, list(BASELINE_NAMES))
+    data = [(_label(c), role, 100 * lv[c][0], 100 * lv[c][1]) for c, role in trio
+            if c in lv and lv[c][0] is not None]
+    if len(data) >= 2 and any(role == "s1" for _, role, *_ in data):
+        spec["mldr-pt"] = ("mldr_slope", {"data": data})
+    curves = {}
+    for task, title in (("LEMBPasskeyRetrieval", "Passkey"), ("LEMBNeedleRetrieval", "Needle")):
+        series = {}
+        for c, _ in trio:
+            sc = split_scores(c if c in BASELINE_NAMES else model_name(c), task)
+            pts = {int(sp.rsplit("_", 1)[-1]): 100 * v for sp, v in sc.items() if sp.rsplit("_", 1)[-1].isdigit()}
+            if pts:
+                series[_label(c)] = pts
+        if _label(ref) in series and len(series) >= 2:
+            curves[title] = series
+    if curves:
+        spec["longembed-length"] = ("length_curves", {"data": curves, "roles": {_label(c): r for c, r in trio},
+                                                      "trained": LONG_MAX})
+    have = [(c, r) for c, r in ((ref, "s1"), (QWEN4B, "s2"), (QWEN8B, "s3")) if c == ref or c in measured]
+    if QWEN4B in measured:
+        cats = list(MTEB_BR_CATEGORIES)
+        vals = {c: [100 * _mean(S[c], MTEB_BR_CATEGORIES[k]) for k in cats] for c, _ in have}
+        order = sorted(range(len(cats)), key=lambda i: -(vals[ref][i] - vals[QWEN4B][i]))
+        spec["mteb-br-categories"] = ("category_dots", {
+            "cats": [cats[i] for i in order],
+            "series": [(_label(c), r, [vals[c][i] for i in order]) for c, r in have]})
+    rows = [(_label(c), "s1" if c == ref else "s1b" if c == "lumi-emb" else "muted", 100 * _mean(S[c], MTEB_BR_TASKS))
+            for c in dict.fromkeys([ref, "lumi-emb", "R0"] + measured) if _complete(S.get(c, {}))]
+    if len(rows) >= 3:
+        spec["mteb-br-ranking"] = ("ranking_bars", {
+            "rows": rows, "title": "MTEB-BR: média das 22 tarefas nativas em PT-BR",
+            "subtitle": "Azul: este trabalho. Mesmo protocolo para todos (instruções em português, até 512 tokens)"})
+    return spec
+
+
+def highlights(S: dict, measured: list[str], made: set[str], img) -> str:
+    """Destaques do modelo publicado contra as referências medidas aqui, com as figuras já geradas."""
+    ref = main_ref(S)
+    s = S.get(ref, {})
+    if not _complete(s):
+        return "_Os destaques aparecem quando o modelo publicado tiver as 22 tarefas do MTEB-BR._"
+    fig = lambda name: [img(name), ""] if name in made else []  # noqa: E731
+    rows = []
+    lv = long_values(S, list(BASELINE_NAMES))
+    if ref != "lumi-emb" and ref in lv and "lumi-emb" in lv:
+        v512, v8k = lv[ref]
+        old = lv["lumi-emb"][1]
+        note = f"{_pct(old)} sem o estágio longo ({_diff(v8k, old)})"
+        if v512 is not None:
+            note += f"; {_pct(v512)} lendo só os primeiros 512 tokens"
+        rows.append(["Documentos longos em PT (MLDR-pt, até 8k tokens)", f"**{_pct(v8k)}**", note])
+    r0 = _mean(S.get("R0", {}), MTEB_BR_TASKS)
+    rows.append(["MTEB-BR (22 tarefas nativas em PT-BR)", f"**{_pct(_mean(s, MTEB_BR_TASKS))}**",
+                 f"{_pct(r0)} do Lumi-4B sem treino" if r0 is not None else "—"])
+    groups = [(f"{k.split(' (')[0]} no MTEB-BR ({len(ts)} tarefas)", ts) for k, ts in MTEB_BR_CATEGORIES.items()]
+    groups += [(f"{PT_FAMILY_NAMES[k]} no MTEB-PT", ts) for k, ts in MTEB_PT_FAMILIES.items()]
+    for name, ts in groups:
+        ours = _mean(s, ts)
+        base = {b: v for b in measured if (v := _mean(S[b], ts)) is not None}
+        if ours is None or not base:
+            continue
+        second = max(base, key=base.get)
+        if ours > base[second]:
+            rows.append([name, f"**{_pct(ours)}**", f"maior média entre os {len(base) + 1} modelos comparados "
+                                                     f"(depois: {_label(second)}, {_pct(base[second])})"])
+        elif QWEN4B in base and ours > base[QWEN4B]:
+            rows.append([name, f"**{_pct(ours)}**", f"acima do Qwen3-Embedding-4B, de mesmo porte ({_pct(base[QWEN4B])})"])
+    md = [_table(["", ref, "Comparação"], rows), ""] + fig("mldr-pt")
+    notes = []
+    ties = [(b, r) for b in measured if (r := _paired(s, S[b])).get("n") and r["p"] >= 0.05]
+    if ties:
+        notes.append("- **Empate estatístico** na média do MTEB-BR com "
+                     + " e ".join(f"{_label(b)} (Δ {100 * r['delta']:+.2f}, p = {_p(r)})" for b, r in ties) + ".")
+    if ref != "lumi-emb" and _complete(S.get("lumi-emb", {})):
+        r = _paired(s, S["lumi-emb"])
+        if r["p"] >= 0.05:
+            notes.append(f"- **O contexto longo não custou nada nos textos curtos:** {ref} − lumi-emb = "
+                         f"{100 * r['delta']:+.2f} no MTEB-BR (p = {_p(r)}).")
+        else:
+            notes.append(f"- Textos curtos: {ref} − lumi-emb = {_delta(r)} no MTEB-BR (p = {_p(r)}).")
+    md += notes + ([""] if notes else [])
+    if QWEN4B in measured:
+        q4, q8 = S[QWEN4B], S.get(QWEN8B, {})
+        cat_of = {t: k.split(" (")[0] for k, ts in MTEB_BR_CATEGORIES.items() for t in ts}
+        wins = sorted((t for t in MTEB_BR_TASKS if s[t] > q4[t]), key=lambda t: q4[t] - s[t])
+        md += ["### Onde ele se destaca\n"] + fig("mteb-br-categories")
+        if wins:
+            h8 = _complete(q8)
+            md += [f"Nas tarefas abaixo ({len(wins)} das 22 do MTEB-BR), o {ref} supera o Qwen3-Embedding-4B, "
+                   "um Transformer de mesmo porte"
+                   + (", e as marcadas com ✓ superam também o Qwen3-Embedding-8B, com o dobro de parâmetros." if h8
+                      else "."), "",
+                   _table(["Tarefa", "Categoria", ref, "Qwen3-Embedding-4B", "Δ"] + (["> 8B"] if h8 else []),
+                          [[t, cat_of[t], f"**{_pct(s[t])}**", _pct(q4[t]), _diff(s[t], q4[t])]
+                           + (["✓" if s[t] > q8[t] else ""] if h8 else []) for t in wins]), ""]
+    md += fig("mteb-br-ranking")
+    if "longembed-length" in made:
+        md += ["### Contexto longo\n", f"O estágio longo treinou com documentos de até {LONG_MAX // 1024}k tokens. "
+               "Nessa faixa, o modelo encontra a informação escondida bem melhor do que antes dele.", ""]
+        md += fig("longembed-length")
+    return "\n".join(md)
