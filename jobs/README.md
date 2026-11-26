@@ -138,5 +138,11 @@ nunca vai no YAML nem na linha de comando.
 **Retomada:** `train`, `synth` e `eval` continuam de onde pararam. Basta reenviar o
 mesmo comando depois de um `max_time` estourado ou de um `sauron cancel`.
 
+**Fila sem acompanhamento:** `train-eval ID[,ID...] SUÍTE [...]` treina os IDs em ordem e avalia o último
+no mesmo job. Assim, uma cadeia como `B0a,B1a,B2a` não depende de alguém enviar a etapa seguinte. Na classe
+menor, o limite é de 24 h por treino da cadeia, até 72 h. Treino já feito é pulado, então reenviar continua de onde parou.
+Vários `train-eval` podem ser enviados de uma vez: a cota roda três por vez na classe menor, e os outros
+esperam na ordem de envio.
+
 A ordem completa e o que conferir entre as etapas estão em
 [docs/embed/PIPELINE.md](../docs/embed/PIPELINE.md).

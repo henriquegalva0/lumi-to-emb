@@ -6,13 +6,14 @@
 #   bash jobs/embed/submit.sh synth --generator qwen3_30b
 #   bash jobs/embed/submit.sh train C1
 #   bash jobs/embed/submit.sh eval C2 mteb_br mteb_pt
+#   LUMI_PROFILE=small bash jobs/embed/submit.sh train-eval B0a,B1a,B2a smoke mteb_br mteb_pt
 #   LUMI_PROFILE=small bash jobs/embed/submit.sh eval R0 mteb_br   (classe menor de GPU)
 # Gera jobs/embed/.generated/<nome>.{yaml,sh} com o perfil de recursos da etapa e chama
 # `sauron submit -f`. Perfis: "gpu" = B200 (vram 160, ~179 GB da cota); "cpu" = a menor classe
 # de GPU (vram 20), para etapas sem GPU — as duas cabem juntas numa cota de 268 GB.
 set -euo pipefail
 trap 'echo "ERRO: submit.sh falhou na linha $LINENO (comando: $BASH_COMMAND)" >&2' ERR
-[ $# -ge 1 ] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+[ $# -ge 1 ] || { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 STEP="$1"; shift
 CLONE="$(cd "$(dirname "$0")/../.." && pwd)"
 WS_ROOT="$HOME/workspace"
@@ -36,6 +37,7 @@ case "$STEP" in
   check|export-base|verify) hours=2 ;;
   synth|mine)              hours=12 ;;
   train|baseline)          hours=12 ;;
+  train-eval)              hours=16 ;;   # treino (~4 h na B200 por estágio) + avaliação
   eval)                    hours=12; mem=32g ;;   # pico medido no MTEB-BR/PT: 7,4 GB
   merge)                   hours=6; mem=64g ;;    # M-C: ram pico 31,7 GB (cache dos safetensors)
 esac
@@ -57,6 +59,10 @@ vram=160; [ "$profile" = cpu ] && vram=20
 # Treino forçado na classe menor (cerca de metade da B200): o dobro do tempo. O treino grava o estado
 # a cada 30 min e retoma sozinho se for reenviado, então um corte perde no máximo esse intervalo.
 if [ "$profile" = cpu ] && [ "$STEP" = train ]; then hours=24; fi
+# train-eval na classe menor: 24 h por checkpoint da cadeia (B0a,B1a,B2a = 3), com teto de 72 h.
+if [ "$profile" = cpu ] && [ "$STEP" = train-eval ]; then
+  n=$(( $(printf '%s' "${1:-}" | tr -cd ',' | wc -c) + 1 )); hours=$(( n * 24 > 72 ? 72 : n * 24 ))
+fi
 SUFFIX=""
 if [ $# -gt 0 ]; then SUFFIX="$(printf -- '-%s' "$@" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40)"; fi
 NAME="lumi-emb-${STEP}${SUFFIX}"

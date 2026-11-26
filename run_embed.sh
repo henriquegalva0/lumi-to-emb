@@ -16,6 +16,7 @@
 #   train ID [--max-minutes N]   treina configs/embed/train/ID.yaml                 (GPU)
 #   merge NOME                   grade de merges + escolha no dev (M-C, M-B)        (GPU)
 #   eval ID SUÍTE [SUÍTE ...]    mteb: smoke, mteb_br, mteb_pt, longembed, eng_v2, mmteb
+#   train-eval ID[,ID...] SUÍTE [...]  treina os IDs em ordem e avalia o último, num job só (GPU)
 #   baseline HF_ID SUÍTE [...]   avalia um modelo de comparação (Tabela 14)
 #   report                       Tabelas 12–15, docs/embed/RESULTS.md e model card
 #   publish ID [--release]       envia o checkpoint ao Hub (branch ID; --release = main)
@@ -50,7 +51,7 @@ CMD="${1:-help}"; [ $# -gt 0 ] && shift
 TS="$(date +%Y%m%d-%H%M%S)"
 say() { echo "[run_embed $(date +%H:%M:%S)] $*"; }
 die() { echo "[run_embed] ERRO: $*" >&2; exit 2; }
-usage() { sed -n '2,32p' "$REPO_DIR/run_embed.sh" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,33p' "$REPO_DIR/run_embed.sh" | sed 's/^# \{0,1\}//'; }
 
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 # MTEB-BR pelo arquivo do commit (a imagem do vLLM não traz o binário git, exigido por URLs git+https)
@@ -127,6 +128,14 @@ main() {
     merge)       embed_env; gpu_banner; run merge "$@" ;;
     eval)        embed_env; gpu_banner; id="$1"; shift; args=(); for s in "$@"; do args+=(--suite "$s"); done
                  run eval "$id" "${args[@]}" ;;
+    train-eval)  # Cadeia num job só (para a fila andar sem ninguém olhando): treina cada ID na ordem e
+                 # avalia o último. Treino já feito é pulado e treino interrompido retoma do estado salvo,
+                 # então reenviar o mesmo comando continua de onde parou. Uma falha para a cadeia.
+                 [ $# -ge 2 ] || die "uso: train-eval ID[,ID...] SUÍTE [SUÍTE ...]"
+                 embed_env; gpu_banner; IFS=, read -ra chain <<< "$1"; shift
+                 for id in "${chain[@]}"; do say "Treino: $id"; run train "$id"; done
+                 last="${chain[${#chain[@]}-1]}"; args=(); for s in "$@"; do args+=(--suite "$s"); done
+                 say "Avaliação: $last ($*)"; run eval "$last" "${args[@]}" ;;
     baseline)    embed_env; gpu_banner; id="$1"; shift; args=(); for s in "$@"; do args+=(--suite "$s"); done
                  run baseline "$id" "${args[@]}" ;;
     report)      embed_env; run report ;;
@@ -142,7 +151,9 @@ if [ "$CMD" = "help" ] || [ "$CMD" = "-h" ] || [ "$CMD" = "--help" ]; then
   main "$@"
 else
   mkdir -p "$LUMI_WORKDIR/logs"
-  LOG="$LUMI_WORKDIR/logs/run_embed_${CMD}_${TS}.log"
+  # O 1º argumento (ID ou cadeia) entra no nome: jobs que começam no mesmo segundo não dividem o log.
+  tag="${1:-}"; tag="${tag//[^A-Za-z0-9._-]/_}"
+  LOG="$LUMI_WORKDIR/logs/run_embed_${CMD}${tag:+_$tag}_${TS}.log"
   say "comando: $CMD $* | workdir: $LUMI_WORKDIR | log: $LOG"
   main "$@" 2>&1 | tee -a "$LOG"
   exit "${PIPESTATUS[0]}"

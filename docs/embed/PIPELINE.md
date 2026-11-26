@@ -46,6 +46,7 @@ setup → check → eval R0/R0e (referência zero-shot)
 | 16b | `train C3-long` | sim | Estágio longo (pipeline principal): parte do `lumi-emb`, currículo 2k → 4k → 8k, dev curto + longo | `checkpoints/C3-long/` |
 | 16c | `merge M-L` | sim | Grade entre o C3-long e o lumi-emb, escolhida no dev curto + longo | `checkpoints/M-L/` |
 | 17 | `verify <ID>` | sim | T1–T4 em qualquer checkpoint (obrigatório antes de publicar) | `checkpoints/<ID>/verify.json` |
+| 17b | `train-eval <ID>[,<ID>...] <suítes>` | sim | Treina os IDs em ordem e avalia o último, num job só (ablações na fila, sem acompanhamento) | `checkpoints/<ID>/`, `results/embed/mteb/` |
 | 18 | `eval <ID> smoke mteb_br mteb_pt` (+ `longembed eng_v2 mldr_pt_long` nos finalistas; `mmteb` opcional) | sim | Avaliação. A `mldr_pt_long` avalia o MLDR em português com documentos de até 8k tokens, num cache separado | `results/embed/mteb/` |
 | 19 | `baseline <hf_id> mteb_br mteb_pt` | sim | Modelos da Tabela 14 com o mesmo protocolo | idem |
 | 20 | `report` | não | Tabelas 12–15, `docs/embed/RESULTS.md`, figuras (`docs/embed/figures/`) e os blocos de destaques (README e card) e de resultados (card) | `results/embed/tables/` |
