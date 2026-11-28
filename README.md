@@ -152,6 +152,34 @@ flowchart LR
 4. **Merges escolhidos no dev.** O M-C junta cinco checkpoints do S2 e dá o **lumi-emb**. O M-L faz um SLERP entre o modelo longo e o lumi-emb e dá o **lumi-emb-long**. A regra de escolha foi fixada antes e nunca olha os testes.
 5. **Avaliação ampla.** São 22 tarefas nativas do MTEB-BR, além do MTEB-PT, do LongEmbed, do MTEB (eng, v2) e do MLDR-pt com documentos de até 8k tokens. Os ICs de 95 % e os testes pareados usam bootstrap sobre as tarefas.
 
+## O que as ablações mostraram
+
+Cada ablação treina o modelo de novo com uma única peça trocada e compara as notas no MTEB-BR. Três lições:
+
+- **A receita em dois estágios se paga.** Sem o S1, ou com os negativos difíceis escolhidos pelo top-k ingênuo (que tende a trazer falsos negativos para o treino), a média cai mais de um ponto.
+- **O Lumi causal já basta.** Tornar o modelo bidirecional, como no LLM2Vec, exige um estágio a mais (MNTP) e não melhorou a média. Com o BiMamba, que roda o Mamba nos dois sentidos, a média piorou. Para este híbrido, a receita causal, com pooling pelo último token, é suficiente.
+- **Os negativos difíceis não mudaram a média.** O C2-nohn, treinado só com os negativos do próprio lote, empatou com o C2 e foi melhor em STS. Ele teve a maior média do MTEB-BR entre os checkpoints treinados até aqui, no nível do modelo publicado, e cada passo é mais barato (2 textos por exemplo em vez de 6). Por isso, é o candidato para o próximo merge.
+
+<!-- ABLATIONS:START -->
+| O que foi testado | Comparação | Δ MTEB-BR [IC 95%] | p | Efeito |
+|---|---|---|---|---|
+| Estágio S1 (pares fracos em grande escala) antes do S2 | C2 − C2-direct | +1.24 [+0.58, +1.98] | < 0.001 | **ajuda** |
+| Negativos difíceis filtrados (PercPos) em vez do top-k ingênuo | C2 − C2-naivehn | +1.28 [+0.61, +1.97] | < 0.001 | **ajuda** |
+| Dados reais e sintéticos juntos no S2, em vez de só sintéticos¹ | C2 − C2-syn | +0.83 [+0.38, +1.36] | < 0.001 | **ajuda** |
+| Dados reais e sintéticos juntos no S2, em vez de só reais¹ | C2 − C2-real | +0.23 [-0.27, +0.68] | 0.349 | empate |
+| Merge de checkpoints (M-C) em vez do C2 sozinho | M-C − C2 | +0.44 [-0.05, +0.90] | 0.074 | empate |
+| 4 negativos difíceis por exemplo no S2, em vez de só os do lote | C2 − C2-nohn | -0.55 [-1.12, +0.02] | 0.058 | empate |
+| Negativos do lote somados aos difíceis, com máscara de falso negativo | C2-ib − C2 | -0.09 [-0.35, +0.13] | 0.459 | empate |
+| Atenção bidirecional (Ba, com MNTP antes) | B2a − C2 | -0.23 [-0.79, +0.28] | 0.392 | empate |
+| Atenção bidirecional + BiMamba (Bf, com MNTP antes) | B2f − C2 | -1.08 [-1.82, -0.34] | 0.005 | **piora** |
+| Echo embeddings (texto repetido), sem treino | R0e − R0 | -2.30 [-4.54, -0.32] | 0.021 | **piora** |
+
+Δ = média das 22 tarefas do MTEB-BR com o que foi testado menos a média sem ele (× 100), com IC de 95 % e p por bootstrap pareado nas tarefas. "Ajuda" ou "piora" quando o IC não cruza o zero. Para comparar, o C2 treinado com 3 sementes varia 0.13 (desvio-padrão) na média.
+
+¹ Conjuntos de tamanhos diferentes: o S2-real e o S2-syn são menores que o S2 completo.
+
+<!-- ABLATIONS:END -->
+
 ## Limitações, em resumo
 
 - **Acima de 8k tokens, o ganho do estágio longo desaparece.** Documentos maiores devem ser divididos em trechos de até 8k.
@@ -167,6 +195,7 @@ A lista completa está no [model card](docs/huggingface/README.md#limitações).
 - **Long documents:** on MLDR-pt with documents of up to 8k tokens, nDCG@10 goes from 47.88 to 73.94 after a short long-context stage, with no loss on short texts.
 - **MTEB-BR (22 native PT-BR tasks):** 62.48. That is twice the untrained backbone (30.65), and statistically tied with multilingual-e5-large-instruct and Qwen3-Embedding-0.6B.
 - **Strengths:** the highest classification average among the compared models (above Qwen3-Embedding-8B). Retrieval is above Qwen3-Embedding-4B, a Transformer of the same size, and the model beats it on 10 of the 22 MTEB-BR tasks.
+- **Ablations:** the two-stage recipe and positive-aware hard-negative filtering each add more than one point. Making the hybrid bidirectional (LLM2Vec-style MNTP, with or without a reverse Mamba scan) does not help, so the causal model is enough. Training with in-batch negatives only ties the hard-negative stage.
 - **Limitations:** the gains stop beyond 8k tokens. It is still about 3 points below Qwen3-Embedding-4B on average, mostly in clustering and STS. Non-commercial use.
 
 **Recipe:**
@@ -185,8 +214,8 @@ As far as we know, it is one of the first hybrid Mamba-Transformer text embedder
 | **1. Janela de contexto** | Até quantos tokens o Lumi recupera informação de forma confiável (L\*) | ✅ concluída | [docs/stage1/](docs/stage1/README.md) |
 | 2. Decisão | Desenho do embedder a partir do L\* | ✅ (abaixo) | — |
 | 3. Dados | Pares naturais, sintéticos de 3 geradores, negativos minerados, descontaminação | ✅ S1, S2 e S-long | [ficha dos dados](docs/embed/DATA_CARD.md) |
-| 4. Treino | LoRA contrastivo em estágios (S1, S2, S-long), merges | ✅ trilho causal, merges M-C e M-L; trilho bidirecional e ablações na fila | [roteiro](docs/embed/PIPELINE.md) · [decisões](docs/embed/DECISIONS.md) |
-| 5. Avaliação | MTEB-BR, MTEB-PT, LongEmbed, MTEB eng v2, MLDR-pt em 8k | ✅ lumi-emb e lumi-emb-long; ablações na fila | [resultados](docs/embed/RESULTS.md) |
+| 4. Treino | LoRA contrastivo em estágios (S1, S2, S-long), merges | ✅ trilho causal, merges M-C e M-L, trilho bidirecional (Ba e Bf) e ablações A1–A5; demais ablações a seguir | [roteiro](docs/embed/PIPELINE.md) · [decisões](docs/embed/DECISIONS.md) |
+| 5. Avaliação | MTEB-BR, MTEB-PT, LongEmbed, MTEB eng v2, MLDR-pt em 8k | ✅ lumi-emb, lumi-emb-long e ablações A1–A5 ([lições](#o-que-as-ablações-mostraram)) | [resultados](docs/embed/RESULTS.md) |
 
 O desenho experimental completo das Etapas 2–5 está no [plano do experimento](docs/embed/plano_experimento.pdf).
 

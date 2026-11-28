@@ -51,6 +51,7 @@ datasets:
 - MLDR-pt with whole documents up to 8k tokens: 73.94, up from 47.88 before the long stage.
 - MTEB-BR, 22 native PT-BR tasks: 62.48. That is twice the untrained backbone (30.65), and statistically tied with multilingual-e5-large-instruct and Qwen3-Embedding-0.6B.
 - The highest classification average among the compared models, and retrieval above Qwen3-Embedding-4B.
+- Ablations: the two-stage recipe and positive-aware hard-negative filtering each add more than one point; making the hybrid bidirectional does not help.
 - Still behind Qwen3-Embedding-4B on average (clustering, STS) and beyond 8k tokens.
 
 Evaluation follows a clean zero-shot contamination policy. A post-hoc audit found overlaps in at most 0.1 % of the training examples, and the conclusions hold without the affected tasks.
@@ -350,7 +351,13 @@ MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). 
 | C2-s3 | 61.82 [53.64, 69.52] | 0.9764 |  |
 | C2-real | 61.74 [53.52, 69.44] | 0.9771 |  |
 | C2-syn | 61.14 [52.84, 68.99] | 0.9726 |  |
+| C2-nohn | 62.51 [54.27, 70.37] | 0.9768 |  |
+| C2-naivehn | 60.69 [52.54, 68.40] | 0.9580 |  |
+| C2-ib | 61.88 [53.69, 69.61] | 0.9778 |  |
+| C2-direct | 60.73 [52.50, 68.57] | 0.9707 |  |
 | C3-long | — | 0.9756 |  |
+| B2a | 61.74 [53.51, 69.50] | 0.9760 |  |
+| B2f | 60.89 [52.71, 68.68] | 0.9746 |  |
 | M-C | 62.41 [54.27, 70.14] | 0.9779 | = M-C-base0.75 |
 | M-L | 62.48 [54.40, 70.10] | 0.9756 | = M-L-slerp-C3-long-lumi-emb-t0.25 |
 | lumi-emb | 62.41 [54.27, 70.14] | 0.9779 | = M-C (M-C-base0.75) |
@@ -401,24 +408,30 @@ MultiLongDocRetrieval em português (documentos longos da Wikipédia e do mC4). 
 
 | ID | Pergunta | Comparação | Δ Mean22 [IC 95%] | p | Tarefas |
 |---|---|---|---|---|---|
+| A1 | O estágio S1 é necessário? | C2 − C2-direct | +1.24 [+0.58, +1.98] | < 0.001 | 22 |
 | S2 | O S2 (negativos difíceis) melhora o C1? | C2 − C1 | +0.19 [-0.24, +0.64] | 0.394 | 22 |
 | A2 | Só dados reais no S2 | C2 − C2-real | +0.23 [-0.27, +0.68] | 0.349 | 22 |
 | A2 | Só dados sintéticos no S2 | C2 − C2-syn | +0.83 [+0.38, +1.36] | < 0.001 | 22 |
 | A2 | Reais contra sintéticos | C2-real − C2-syn | +0.60 [-0.17, +1.49] | 0.138 | 22 |
+| A3 | Sem negativos difíceis | C2 − C2-nohn | -0.55 [-1.12, +0.02] | 0.058 | 22 |
+| A3 | Top-k ingênuo | C2 − C2-naivehn | +1.28 [+0.61, +1.97] | < 0.001 | 22 |
+| A4 | In-batch + máscara de falso negativo | C2 − C2-ib | +0.09 [-0.13, +0.35] | 0.459 | 22 |
+| A5 | Bidirecional (atenção) | B2a − C2 | -0.23 [-0.79, +0.28] | 0.392 | 22 |
+| A5 | Bidirecional (atenção + BiMamba) | B2f − C2 | -1.08 [-1.82, -0.34] | 0.005 | 22 |
 | A7 | Echo embeddings sem treino | R0e − R0 | -2.30 [-4.54, -0.32] | 0.021 | 22 |
 | A9 | Merge causal vs C2 | M-C − C2 | +0.44 [-0.05, +0.90] | 0.074 | 22 |
 
-No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão na mesma escala, prevista no plano, fica para a fase de ablações.
+No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão na mesma escala, prevista no plano, ainda não rodou.
 
 #### Hipóteses pré-registradas
 
 | ID | Hipótese | Teste | Δ [IC 95%] | p | Situação |
 |---|---|---|---|---|---|
 | H1 | Paridade prática com Transformers de porte similar | C2 − Qwen3-Embedding-4B | -3.56 [-6.60, -0.76] | 0.012 | Refutada |
-| H2 | O S1 melhora o resultado final | C2 − C2-direct | — | — | — |
+| H2 | O S1 melhora o resultado final | C2 − C2-direct | +1.24 [+0.58, +1.98] | < 0.001 | Não refutada |
 | H3 | Reais ajudam mais nas tarefas nativas | C2-real − C2-syn | +0.60 [-0.17, +1.49] | 0.138 | Não refutada |
-| H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
-| H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
+| H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | +1.28 [+0.61, +1.97] | < 0.001 | Não refutada |
+| H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | -0.23 [-0.79, +0.28]; -1.08 [-1.82, -0.34] | 0.392; 0.005 | Refutada |
 | H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
 | H7 | Vantagem relativa em entradas longas | C3-long − Qwen3-Embedding-4B, LongEmbed | -22.58 | — | Refutada |
 
@@ -440,11 +453,39 @@ A situação de cada hipótese está na tabela "Hipóteses pré-registradas", ac
 | H6 | O merge supera o melhor checkpoint individual | M-C ≤ melhor C2 no dev |
 | H7 | Vantagem relativa em entradas longas | C3-long ou C2 abaixo de Transformers de porte similar no LongEmbed |
 
+## O que as ablações mostraram
+
+Cada ablação treina o modelo de novo com uma única peça trocada e compara as notas no MTEB-BR. Três lições:
+
+- **A receita em dois estágios se paga.** Sem o S1, ou com os negativos difíceis escolhidos pelo top-k ingênuo (que tende a trazer falsos negativos para o treino), a média cai mais de um ponto.
+- **O Lumi causal já basta.** Tornar o modelo bidirecional, como no LLM2Vec, exige um estágio a mais (MNTP) e não melhorou a média. Com o BiMamba, que roda o Mamba nos dois sentidos, a média piorou. Para este híbrido, a receita causal, com pooling pelo último token, é suficiente.
+- **Os negativos difíceis não mudaram a média.** O C2-nohn, treinado só com os negativos do próprio lote, empatou com o C2 e foi melhor em STS. Ele teve a maior média do MTEB-BR entre os checkpoints treinados até aqui, no nível do modelo publicado, e cada passo é mais barato (2 textos por exemplo em vez de 6). Por isso, é o candidato para o próximo merge.
+
+<!-- ABLATIONS:START -->
+| O que foi testado | Comparação | Δ MTEB-BR [IC 95%] | p | Efeito |
+|---|---|---|---|---|
+| Estágio S1 (pares fracos em grande escala) antes do S2 | C2 − C2-direct | +1.24 [+0.58, +1.98] | < 0.001 | **ajuda** |
+| Negativos difíceis filtrados (PercPos) em vez do top-k ingênuo | C2 − C2-naivehn | +1.28 [+0.61, +1.97] | < 0.001 | **ajuda** |
+| Dados reais e sintéticos juntos no S2, em vez de só sintéticos¹ | C2 − C2-syn | +0.83 [+0.38, +1.36] | < 0.001 | **ajuda** |
+| Dados reais e sintéticos juntos no S2, em vez de só reais¹ | C2 − C2-real | +0.23 [-0.27, +0.68] | 0.349 | empate |
+| Merge de checkpoints (M-C) em vez do C2 sozinho | M-C − C2 | +0.44 [-0.05, +0.90] | 0.074 | empate |
+| 4 negativos difíceis por exemplo no S2, em vez de só os do lote | C2 − C2-nohn | -0.55 [-1.12, +0.02] | 0.058 | empate |
+| Negativos do lote somados aos difíceis, com máscara de falso negativo | C2-ib − C2 | -0.09 [-0.35, +0.13] | 0.459 | empate |
+| Atenção bidirecional (Ba, com MNTP antes) | B2a − C2 | -0.23 [-0.79, +0.28] | 0.392 | empate |
+| Atenção bidirecional + BiMamba (Bf, com MNTP antes) | B2f − C2 | -1.08 [-1.82, -0.34] | 0.005 | **piora** |
+| Echo embeddings (texto repetido), sem treino | R0e − R0 | -2.30 [-4.54, -0.32] | 0.021 | **piora** |
+
+Δ = média das 22 tarefas do MTEB-BR com o que foi testado menos a média sem ele (× 100), com IC de 95 % e p por bootstrap pareado nas tarefas. "Ajuda" ou "piora" quando o IC não cruza o zero. Para comparar, o C2 treinado com 3 sementes varia 0.13 (desvio-padrão) na média.
+
+¹ Conjuntos de tamanhos diferentes: o S2-real e o S2-syn são menores que o S2 completo.
+
+<!-- ABLATIONS:END -->
+
 ## Limitações
 
 - **Clusterização e STS:** é onde está a maior distância para o Qwen3-Embedding-4B, que fica cerca de 3 pontos acima na média do MTEB-BR; a clusterização responde pela maior parte dessa diferença. A mistura de treino tem quase só pares de busca e de frases semelhantes, sem dados que ensinem "mesmo tema", e o treino quase não moveu a clusterização.
 - **Acima de 8k tokens:** o estágio longo treinou até 8k, e o ganho não se estende além disso. No Needle do LongEmbed, o acerto cai para perto de zero em 16k. Documentos maiores devem ser divididos em trechos de até 8k. No LongEmbed, que é em inglês e vai até 32k, o lumi-emb-long fica em 56,06, contra 80,12 do Qwen3-Embedding-4B. No MLDR-pt em 8k, fica em 73,94, contra 80,23.
-- **Arquitetura:** o embedder híbrido Mamba-Transformer não tem validação prévia na literatura, e o trilho bidirecional é experimental.
+- **Arquitetura:** o embedder híbrido Mamba-Transformer não tem validação prévia na literatura. O trilho bidirecional (Ba e Bf) foi testado e não superou o causal.
 - **Inglês:** o lumi-emb fica em 63,30 no MTEB (eng, v2), com 41 tarefas; o lumi-emb-long e os baselines ainda não foram medidos nele com o nosso protocolo.
 - **Dependência do teacher:** os negativos e o filtro dos sintéticos vêm do Qwen3-Embedding-4B.
 - **Escala reduzida:** centenas de milhares de pares, contra dezenas de milhões na literatura.

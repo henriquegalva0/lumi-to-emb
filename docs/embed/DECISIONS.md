@@ -55,6 +55,9 @@ A [Etapa 1](../stage1/README.md) mediu que o Lumi recupera de forma confiável a
 | **Destaques e figuras gerados pelo `report`** (blocos `HIGHLIGHTS` do README e do card; `docs/embed/figures/`) | Mesma regra das tabelas: só a partir dos arquivos de resultado, e cada figura só sai se os dados existirem. Os Δ usam os valores já arredondados, para bater com a conta feita a partir da tabela |
 | **`mix --only long`** | Regrava só o conjunto longo; S1/S2 são recalculados (determinísticos) para as exclusões, mas não regravados |
 | **S0 (MNTP): token de máscara `<unk>`, 30 % mascarado, posição i prevista pelo logit de i − 1** | O tokenizer do Lumi não tem token de máscara. O LLM2Vec usa um token raro, e 30 % fica no meio da faixa 20–40 % do plano. Só os logits das posições mascaradas são calculados |
+| **O trilho causal segue como o principal** (A5; H5 refutada) | O B2a empata com o C2 no MTEB-BR (−0,23, p = 0,39) e o B2f fica abaixo (−1,08, p = 0,005). Os dois pedem o MNTP antes, e o BiMamba deixa o treino mais lento. Com isso, o merge M-B perde prioridade |
+| **S1 e filtro PercPos mantidos** (A1 e A3; H2 e H4 não refutadas) | Sem o S1, o C2 perde 1,24 no MTEB-BR; com o top-k ingênuo no lugar do PercPos, perde 1,28 (p < 0,001 nos dois) |
+| **C2-nohn como candidato ao próximo merge** (proposta) | Sem negativos difíceis, o S2 empata com o C2 na média (0,55 a favor do C2-nohn, p = 0,058), com STS melhor e passos mais baratos (2 textos por exemplo em vez de 6) |
 
 ## Dados
 

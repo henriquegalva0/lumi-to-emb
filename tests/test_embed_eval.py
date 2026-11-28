@@ -153,6 +153,26 @@ def test_highlights_and_figures_come_from_result_files(tmp_path, monkeypatch):
         assert "](docs/figures/mteb-br-ranking-light.png)" in card
 
 
+def test_lessons_read_each_ablation_as_an_effect():
+    # Bloco ABLATIONS do README e do card: Δ = com o componente − sem ele; o efeito sai do IC, e as
+    # ablações sem as 22 tarefas não aparecem.
+    base = {t: 0.60 + 0.001 * i for i, t in enumerate(rep.MTEB_BR_TASKS)}
+    S = {"C2": base,
+         "C2-direct": {t: v - 0.012 for t, v in base.items()},
+         "C2-nohn": {t: v + (0.004 if i % 2 else -0.004) for i, (t, v) in enumerate(base.items())},
+         "B2f": {t: v - 0.01 for t, v in base.items()},
+         "C2-s2": {t: v - 0.002 for t, v in base.items()}}
+    md = rep.lessons(S)
+    row = lambda k: next(line for line in md.splitlines() if f"| {k} |" in line)  # noqa: E731
+    assert row("C2 − C2-direct").startswith("| Estágio S1") and "+1.20" in row("C2 − C2-direct")
+    assert row("C2 − C2-direct").endswith("| **ajuda** |")
+    assert row("C2 − C2-nohn").endswith("| empate |")
+    assert row("B2f − C2").endswith("| **piora** |")
+    assert "C2-syn" not in md and "¹" not in md
+    assert "2 sementes varia 0.14" in md
+    assert rep.lessons({}).startswith("_As lições")
+
+
 def test_figures_render_all_kinds(tmp_path):
     pytest.importorskip("matplotlib")
     from lumi_embed.eval.figures import render

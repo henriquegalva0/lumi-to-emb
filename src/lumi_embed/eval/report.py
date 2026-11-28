@@ -7,7 +7,8 @@ já presentes no plano, sempre com a referência entre colchetes. Notas × 100.
 Saídas: results/embed/tables/*.csv, docs/embed/RESULTS.md (completo) e, no model card
 (docs/huggingface/README.md), o bloco entre <!-- RESULTS:START --> e <!-- RESULTS:END -->,
 regenerado numa versão resumida (só linhas com resultado). Os destaques (bloco <!-- HIGHLIGHTS -->
-do README e do card) e as figuras (docs/embed/figures/) saem das mesmas notas.
+do README e do card), as lições das ablações (bloco <!-- ABLATIONS -->) e as figuras
+(docs/embed/figures/) saem das mesmas notas.
 
 O lumi-emb é uma cópia de um checkpoint (checkpoints/lumi-emb/choice.json). Ele é avaliado com o
 próprio nome; a origem (ex.: M-C) recebe as mesmas notas, porque os pesos são os mesmos.
@@ -106,7 +107,20 @@ CONTAM_NOTE = ("A auditoria posterior (`results/embed/contamination/audit.md`) a
                "tarefas, e a comparação pareada é repetida.")
 A2_NOTE = ("No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 "
            "completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão "
-           "na mesma escala, prevista no plano, fica para a fase de ablações.")
+           "na mesma escala, prevista no plano, ainda não rodou.")
+# Lições das ablações (bloco ABLATIONS do README e do card). Δ = com o que foi testado − sem ele.
+LESSONS = [
+    ("Estágio S1 (pares fracos em grande escala) antes do S2", "C2", "C2-direct"),
+    ("Negativos difíceis filtrados (PercPos) em vez do top-k ingênuo", "C2", "C2-naivehn"),
+    ("Dados reais e sintéticos juntos no S2, em vez de só sintéticos¹", "C2", "C2-syn"),
+    ("Dados reais e sintéticos juntos no S2, em vez de só reais¹", "C2", "C2-real"),
+    ("Merge de checkpoints (M-C) em vez do C2 sozinho", "M-C", "C2"),
+    ("4 negativos difíceis por exemplo no S2, em vez de só os do lote", "C2", "C2-nohn"),
+    ("Negativos do lote somados aos difíceis, com máscara de falso negativo", "C2-ib", "C2"),
+    ("Atenção bidirecional (Ba, com MNTP antes)", "B2a", "C2"),
+    ("Atenção bidirecional + BiMamba (Bf, com MNTP antes)", "B2f", "C2"),
+    ("Echo embeddings (texto repetido), sem treino", "R0e", "R0"),
+]
 RESULTS_URL = "https://github.com/henriquegalva0/lumi-to-emb/blob/main/docs/embed/RESULTS.md"
 NA = {"n": 0}
 
@@ -354,7 +368,7 @@ def hypotheses(S: dict, lists: dict, SX: dict | None = None) -> list[list]:
     ra, rf, rbf = _paired(S["B2a"], S["C2"]), _paired(S["B2f"], S["C2"]), _paired(S["B2f"], S["B2a"])
     h5 = NA if 0 in (ra.get("n", 0), rf.get("n", 0)) else rbf
     rows.append(["H5", "O bidirecional melhora a média", "B2a − C2; B2f − C2", f"{_delta(ra)}; {_delta(rf)}",
-                 "—", verdict(h5, h5.get("delta", 0) <= 0 or (ra.get("delta", 0) <= 0 and rf.get("delta", 0) <= 0))])
+                 f"{_p(ra)}; {_p(rf)}", verdict(h5, h5.get("delta", 0) <= 0 or (ra.get("delta", 0) <= 0 and rf.get("delta", 0) <= 0))])
     rep = _json(ckpt_dir("M-C") / "merge_report.json")
     if rep:
         best = rep["best_individual"]
@@ -550,6 +564,8 @@ def build_report(ecfg: dict) -> str:
     _replace_block(REPO_ROOT / "README.md", "HIGHLIGHTS", highlights(S, measured, made, _img_github))
     _replace_block(REPO_ROOT / "docs" / "huggingface" / "README.md", "HIGHLIGHTS",
                    highlights(S, measured, made, _img_hub))
+    for path in (REPO_ROOT / "README.md", REPO_ROOT / "docs" / "huggingface" / "README.md"):
+        _replace_block(path, "ABLATIONS", lessons(S))
     return text
 
 
@@ -697,6 +713,28 @@ def figure_spec(S: dict, measured: list[str]) -> dict:
             "rows": rows, "title": "MTEB-BR: média das 22 tarefas nativas em PT-BR",
             "subtitle": "Azul: este trabalho. Mesmo protocolo para todos (instruções em português, até 512 tokens)"})
     return spec
+
+
+def lessons(S: dict) -> str:
+    """Tabela das ablações já avaliadas, lida como efeito do componente: ajuda, empate ou piora (pelo IC)."""
+    rows = []
+    for q, a, b in LESSONS:
+        r = _paired(S.get(a, {}), S.get(b, {}))
+        if r.get("n"):
+            effect = "**ajuda**" if r["lo"] > 0 else "**piora**" if r["hi"] < 0 else "empate"
+            rows.append([q, f"{a} − {b}", _delta(r), _p(r), effect])
+    if not rows:
+        return "_As lições aparecem quando houver ablações com as 22 tarefas do MTEB-BR._"
+    md = [_table(["O que foi testado", "Comparação", "Δ MTEB-BR [IC 95%]", "p", "Efeito"], rows), "",
+          "Δ = média das 22 tarefas do MTEB-BR com o que foi testado menos a média sem ele (× 100), com IC de 95 % "
+          "e p por bootstrap pareado nas tarefas. \"Ajuda\" ou \"piora\" quando o IC não cruza o zero."]
+    seeds = [100 * _mean(S[c], MTEB_BR_TASKS) for c in SEEDS if _complete(S.get(c, {}))]
+    if len(seeds) >= 2:
+        md[-1] += (f" Para comparar, o C2 treinado com {len(seeds)} sementes varia {statistics.stdev(seeds):.2f} "
+                   "(desvio-padrão) na média.")
+    if any("¹" in r[0] for r in rows):
+        md += ["", "¹ Conjuntos de tamanhos diferentes: o S2-real e o S2-syn são menores que o S2 completo."]
+    return "\n".join(md)
 
 
 def highlights(S: dict, measured: list[str], made: set[str], img) -> str:

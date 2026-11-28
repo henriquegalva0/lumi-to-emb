@@ -19,13 +19,13 @@ O **lumi-emb-long** é o checkpoint `M-L` (M-L-slerp-C3-long-lumi-emb-t0.25), es
 | C2-s3 | 61.82 [53.64, 69.52] | 78.12 | 55.55 | 77.03 | 85.03 | — | — | — |
 | C2-real | 61.74 [53.52, 69.44] | 78.16 | 55.65 | 76.63 | 85.00 | — | — | — |
 | C2-syn | 61.14 [52.84, 68.99] | 77.49 | 55.54 | 76.55 | 84.86 | — | — | — |
-| C2-nohn | — | — | — | — | — | — | — | — |
-| C2-naivehn | — | — | — | — | — | — | — | — |
-| C2-ib | — | — | — | — | — | — | — | — |
-| C2-direct | — | — | — | — | — | — | — | — |
+| C2-nohn | 62.51 [54.27, 70.37] | 80.33 | 55.64 | 77.37 | 85.33 | — | — | — |
+| C2-naivehn | 60.69 [52.54, 68.40] | 76.04 | 56.24 | 75.87 | 84.87 | — | — | — |
+| C2-ib | 61.88 [53.69, 69.61] | 78.89 | 55.72 | 77.10 | 85.04 | — | — | — |
+| C2-direct | 60.73 [52.50, 68.57] | 78.14 | 55.38 | 76.40 | 84.60 | — | — | — |
 | C3-long | — | — | — | — | — | — | — | 57.54 |
-| B2a | — | — | — | — | — | — | — | — |
-| B2f | — | — | — | — | — | — | — | — |
+| B2a | 61.74 [53.51, 69.50] | 77.45 | 54.39 | 77.41 | 85.05 | — | — | — |
+| B2f | 60.89 [52.71, 68.68] | 77.64 | 54.50 | 76.81 | 84.61 | — | — | — |
 | M-C | 62.41 [54.27, 70.14] | 79.49 | 55.40 | 77.84 | 85.35 | — | 63.30 | 47.50 |
 | M-B | — | — | — | — | — | — | — | — |
 | M-L | 62.48 [54.40, 70.10] | 78.80 | 56.21 | 77.87 | 84.91 | — | — | 56.06 |
@@ -49,13 +49,13 @@ O **lumi-emb-long** é o checkpoint `M-L` (M-L-slerp-C3-long-lumi-emb-t0.25), es
 | C2-s3 | 66.66 | 29.22 | 84.26 | 73.41 | 52.59 | 61.74 | 57.72 |
 | C2-real | 67.01 | 29.51 | 83.96 | 72.58 | 53.30 | 61.09 | 57.29 |
 | C2-syn | 66.60 | 29.92 | 84.19 | 72.83 | 50.32 | 61.39 | 57.38 |
-| C2-nohn | — | — | — | — | — | — | — |
-| C2-naivehn | — | — | — | — | — | — | — |
-| C2-ib | — | — | — | — | — | — | — |
-| C2-direct | — | — | — | — | — | — | — |
+| C2-nohn | 66.98 | 28.61 | 85.66 | 75.92 | 53.52 | 61.92 | 58.27 |
+| C2-naivehn | 67.10 | 30.07 | 83.65 | 71.99 | 50.54 | 60.27 | 55.58 |
+| C2-ib | 66.46 | 29.53 | 84.78 | 73.92 | 52.37 | 61.89 | 57.66 |
+| C2-direct | 67.07 | 28.57 | 84.56 | 73.23 | 49.31 | 60.43 | 57.28 |
 | C3-long | — | — | — | — | — | — | — |
-| B2a | — | — | — | — | — | — | — |
-| B2f | — | — | — | — | — | — | — |
+| B2a | 66.75 | 25.87 | 85.62 | 72.95 | 52.50 | 61.69 | 57.78 |
+| B2f | 65.52 | 28.12 | 85.75 | 73.42 | 50.27 | 60.68 | 57.79 |
 | M-C | 67.34 | 29.63 | 85.03 | 74.78 | 52.90 | 62.18 | 58.36 |
 | M-B | — | — | — | — | — | — | — |
 | M-L | 67.73 | 29.92 | 84.22 | 73.49 | 53.31 | 62.56 | 58.17 |
@@ -186,31 +186,31 @@ A auditoria posterior (`results/embed/contamination/audit.md`) achou textos de t
 
 | ID | Pergunta | Comparação | Δ Mean22 [IC 95%] | p | Tarefas |
 |---|---|---|---|---|---|
-| A1 | O estágio S1 é necessário? | C2 − C2-direct | — | — | 0 |
+| A1 | O estágio S1 é necessário? | C2 − C2-direct | +1.24 [+0.58, +1.98] | < 0.001 | 22 |
 | S2 | O S2 (negativos difíceis) melhora o C1? | C2 − C1 | +0.19 [-0.24, +0.64] | 0.394 | 22 |
 | A2 | Só dados reais no S2 | C2 − C2-real | +0.23 [-0.27, +0.68] | 0.349 | 22 |
 | A2 | Só dados sintéticos no S2 | C2 − C2-syn | +0.83 [+0.38, +1.36] | < 0.001 | 22 |
 | A2 | Reais contra sintéticos | C2-real − C2-syn | +0.60 [-0.17, +1.49] | 0.138 | 22 |
-| A3 | Sem negativos difíceis | C2 − C2-nohn | — | — | 0 |
-| A3 | Top-k ingênuo | C2 − C2-naivehn | — | — | 0 |
-| A4 | In-batch + máscara de falso negativo | C2 − C2-ib | — | — | 0 |
-| A5 | Bidirecional (atenção) | B2a − C2 | — | — | 0 |
-| A5 | Bidirecional (atenção + BiMamba) | B2f − C2 | — | — | 0 |
+| A3 | Sem negativos difíceis | C2 − C2-nohn | -0.55 [-1.12, +0.02] | 0.058 | 22 |
+| A3 | Top-k ingênuo | C2 − C2-naivehn | +1.28 [+0.61, +1.97] | < 0.001 | 22 |
+| A4 | In-batch + máscara de falso negativo | C2 − C2-ib | +0.09 [-0.13, +0.35] | 0.459 | 22 |
+| A5 | Bidirecional (atenção) | B2a − C2 | -0.23 [-0.79, +0.28] | 0.392 | 22 |
+| A5 | Bidirecional (atenção + BiMamba) | B2f − C2 | -1.08 [-1.82, -0.34] | 0.005 | 22 |
 | A7 | Echo embeddings sem treino | R0e − R0 | -2.30 [-4.54, -0.32] | 0.021 | 22 |
 | A9 | Merge causal vs C2 | M-C − C2 | +0.44 [-0.05, +0.90] | 0.074 | 22 |
 | A13 | Contexto longo | C3-long − C2 | — | — | 0 |
 
-No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão na mesma escala, prevista no plano, fica para a fase de ablações.
+No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram menores que o S2 completo e diferentes entre si (tamanhos em `data/embed/sets/manifest.json` e no DATA_CARD). A versão na mesma escala, prevista no plano, ainda não rodou.
 
 ## Hipóteses pré-registradas: situação
 
 | ID | Hipótese | Teste | Δ [IC 95%] | p | Situação |
 |---|---|---|---|---|---|
 | H1 | Paridade prática com Transformers de porte similar | C2 − Qwen3-Embedding-4B | -3.56 [-6.60, -0.76] | 0.012 | Refutada |
-| H2 | O S1 melhora o resultado final | C2 − C2-direct | — | — | — |
+| H2 | O S1 melhora o resultado final | C2 − C2-direct | +1.24 [+0.58, +1.98] | < 0.001 | Não refutada |
 | H3 | Reais ajudam mais nas tarefas nativas | C2-real − C2-syn | +0.60 [-0.17, +1.49] | 0.138 | Não refutada |
-| H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | — | — | — |
-| H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | —; — | — | — |
+| H4 | Negativos positive-aware superam o top-k ingênuo | C2 − C2-naivehn | +1.28 [+0.61, +1.97] | < 0.001 | Não refutada |
+| H5 | O bidirecional melhora a média | B2a − C2; B2f − C2 | -0.23 [-0.79, +0.28]; -1.08 [-1.82, -0.34] | 0.392; 0.005 | Refutada |
 | H6 | O merge supera o melhor checkpoint individual (dev) | M-C (M-C-base0.75) − C2-real, nDCG@10 no dev | +0.08 | — | Não refutada |
 | H7 | Vantagem relativa em entradas longas | C3-long − Qwen3-Embedding-4B, LongEmbed | -22.58 | — | Refutada |
 
@@ -226,7 +226,13 @@ No A2, os conjuntos do S2 não têm o mesmo tamanho: S2-real e S2-syn ficaram me
 | C2-s3 | 0.9764 | 937 | 247.3 |  |
 | C2-real | 0.9771 | 711 | 187.6 |  |
 | C2-syn | 0.9726 | 579 | 157.8 |  |
+| C2-nohn | 0.9768 | 937 | 176.7 |  |
+| C2-naivehn | 0.9580 | 937 | 426.2 |  |
+| C2-ib | 0.9778 | 937 | 529.1 |  |
+| C2-direct | 0.9707 | 937 | 428.9 |  |
 | C3-long | 0.9756 | 755 | 850.4 |  |
+| B2a | 0.9760 | 937 | 455.2 |  |
+| B2f | 0.9746 | 937 | 682.2 |  |
 | M-C | 0.9779 | — | — | = M-C-base0.75 |
 | M-L | 0.9756 | — | — | = M-L-slerp-C3-long-lumi-emb-t0.25 |
 | lumi-emb | 0.9779 | — | — | = M-C (M-C-base0.75) |
